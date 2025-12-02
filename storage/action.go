@@ -15,7 +15,7 @@ func (s *UserActionStorage[T]) getUserActionsKey(userID int64) string {
 
 type UserAction int
 
-type UserActionStorage[T UserAction] struct {
+type UserActionStorage[T interface{ UserAction }] struct {
 	botInstancePrefix string
 	client            *redis.Client
 }

@@ -38,7 +38,7 @@ type TelegramStateService[Action storage.UserAction, Command string, Callback Ca
 	middlewareFunc HandlerFunc
 }
 
-func NewTelegramStateService[Action storage.UserAction, Command string, Callback CallbackPrefix](
+func NewTelegramStateService[Action interface{ storage.UserAction }, Command string, Callback CallbackPrefix](
 	cfg config.TelegramConfig,
 	actionStorage *storage.UserActionStorage[Action],
 ) *TelegramStateService[Action, Command, Callback] {
