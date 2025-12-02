@@ -6,6 +6,7 @@ import (
 	"github.com/nejkit/telegram-bot-core/config"
 	"github.com/nejkit/telegram-bot-core/storage"
 	"github.com/nejkit/telegram-bot-core/wrapper"
+	"golang.org/x/time/rate"
 )
 
 type HandlerFunc func(ctx context.Context, update *tgbotapi.Update) bool
@@ -28,8 +29,11 @@ type TelegramStateService[Action storage.UserAction, Command string, Callback st
 	chatMemberHandler   HandlerFunc
 	myChatMemberHandler HandlerFunc
 
+	limiterMessageHandler HandlerFunc
+
 	actionStorage *storage.UserActionStorage[Action]
 	workersCount  int
+	limiter       *UserLimiter
 }
 
 func NewTelegramStateService[Action storage.UserAction, Command string, Callback string](
@@ -42,11 +46,47 @@ func NewTelegramStateService[Action storage.UserAction, Command string, Callback
 		commandHandler:      make(map[Command]HandlerInfo),
 		actionHandler:       make(map[Action]HandlerInfo),
 		callbackHandler:     make(map[Callback]HandlerInfo),
-		chatMemberHandler:   nil,
-		myChatMemberHandler: nil,
-		actionStorage:       actionStorage,
-		workersCount:        cfg.WorkersCount,
+
+		actionStorage: actionStorage,
+		workersCount:  cfg.WorkersCount,
+		limiter:       NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 0),
 	}
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) RegisterActionHandler(action Action, handler HandlerInfo) *TelegramStateService[Action, Command, Callback] {
+	t.actionHandler[action] = handler
+
+	return t
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) RegisterCommandHandler(cmd Command, handler HandlerInfo) *TelegramStateService[Action, Command, Callback] {
+	t.commandHandler[cmd] = handler
+
+	return t
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) RegisterCallbackHandler(callback Callback, handler HandlerInfo) *TelegramStateService[Action, Command, Callback] {
+	t.callbackHandler[callback] = handler
+
+	return t
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) RegisterMyChatMemberHandler(handler HandlerFunc) *TelegramStateService[Action, Command, Callback] {
+	t.myChatMemberHandler = handler
+
+	return t
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) RegisterChatMemberHandler(handler HandlerFunc) *TelegramStateService[Action, Command, Callback] {
+	t.chatMemberHandler = handler
+
+	return t
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) RegisterLimiterHandler(handler HandlerFunc) *TelegramStateService[Action, Command, Callback] {
+	t.limiterMessageHandler = handler
+
+	return t
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Context, updatesChan tgbotapi.UpdatesChannel) {
@@ -63,13 +103,25 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 			}
 
 			chatID := update.FromChat().ID
+			userID := update.SentFrom().ID
+			withRateCheck := true
 
 			if update.ChatMember != nil {
 				chatID = update.ChatMember.Chat.ID
+				withRateCheck = false
 			}
 
 			if update.MyChatMember != nil {
 				chatID = update.MyChatMember.Chat.ID
+				withRateCheck = false
+			}
+
+			if withRateCheck && !t.limiter.Check(userID) {
+				if t.limiterMessageHandler != nil {
+					t.limiterMessageHandler(ctx, &update)
+				}
+
+				return
 			}
 
 			if _, ok = t.chatRequestChannels[chatID]; !ok {
