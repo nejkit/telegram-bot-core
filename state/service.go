@@ -31,9 +31,10 @@ type TelegramStateService[Action storage.UserAction, Command string, Callback st
 
 	limiterMessageHandler HandlerFunc
 
-	actionStorage *storage.UserActionStorage[Action]
-	workersCount  int
-	limiter       *UserLimiter
+	actionStorage  *storage.UserActionStorage[Action]
+	workersCount   int
+	limiter        *UserLimiter
+	middlewareFunc HandlerFunc
 }
 
 func NewTelegramStateService[Action storage.UserAction, Command string, Callback string](
@@ -85,6 +86,12 @@ func (t *TelegramStateService[Action, Command, Callback]) RegisterChatMemberHand
 
 func (t *TelegramStateService[Action, Command, Callback]) RegisterLimiterHandler(handler HandlerFunc) *TelegramStateService[Action, Command, Callback] {
 	t.limiterMessageHandler = handler
+
+	return t
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) RegisterMiddlewareHandler(handler HandlerFunc) *TelegramStateService[Action, Command, Callback] {
+	t.middlewareFunc = handler
 
 	return t
 }
@@ -179,6 +186,10 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx context.Context, update *tgbotapi.Update) {
+	if t.middlewareFunc != nil && !t.middlewareFunc(ctx, update) {
+		return
+	}
+
 	if update.MyChatMember != nil && t.myChatMemberHandler != nil {
 		t.myChatMemberHandler(ctx, update)
 	}
