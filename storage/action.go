@@ -20,7 +20,7 @@ type UserActionStorage[T interface{ UserAction }] struct {
 	client            *redis.Client
 }
 
-func NewUserActionStorage[T UserAction](
+func NewUserActionStorage[T interface{ UserAction }](
 	botInstancePrefix string,
 	client *redis.Client,
 ) *UserActionStorage[T] {

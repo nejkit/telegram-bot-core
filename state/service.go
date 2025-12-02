@@ -19,7 +19,7 @@ type HandlerInfo struct {
 	MessageValidators []ValidatorFunc
 }
 
-type TelegramStateService[Action storage.UserAction, Command string, Callback CallbackPrefix] struct {
+type TelegramStateService[Action interface{ storage.UserAction }, Command string, Callback interface{ CallbackPrefix }] struct {
 	chatRequestChannels map[int64]chan tgbotapi.Update
 	processingQueueChan chan int64
 
@@ -38,7 +38,7 @@ type TelegramStateService[Action storage.UserAction, Command string, Callback Ca
 	middlewareFunc HandlerFunc
 }
 
-func NewTelegramStateService[Action interface{ storage.UserAction }, Command string, Callback CallbackPrefix](
+func NewTelegramStateService[Action interface{ storage.UserAction }, Command string, Callback interface{ CallbackPrefix }](
 	cfg config.TelegramConfig,
 	actionStorage *storage.UserActionStorage[Action],
 ) *TelegramStateService[Action, Command, Callback] {
