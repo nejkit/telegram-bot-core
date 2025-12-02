@@ -6,6 +6,7 @@ import (
 	"github.com/nejkit/telegram-bot-core/config"
 	"github.com/nejkit/telegram-bot-core/storage"
 	"github.com/nejkit/telegram-bot-core/wrapper"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
 
@@ -18,7 +19,7 @@ type HandlerInfo struct {
 	MessageValidators []ValidatorFunc
 }
 
-type TelegramStateService[Action storage.UserAction, Command string, Callback string] struct {
+type TelegramStateService[Action storage.UserAction, Command string, Callback CallbackPrefix] struct {
 	chatRequestChannels map[int64]chan tgbotapi.Update
 	processingQueueChan chan int64
 
@@ -37,7 +38,7 @@ type TelegramStateService[Action storage.UserAction, Command string, Callback st
 	middlewareFunc HandlerFunc
 }
 
-func NewTelegramStateService[Action storage.UserAction, Command string, Callback string](
+func NewTelegramStateService[Action storage.UserAction, Command string, Callback CallbackPrefix](
 	cfg config.TelegramConfig,
 	actionStorage *storage.UserActionStorage[Action],
 ) *TelegramStateService[Action, Command, Callback] {
@@ -97,6 +98,7 @@ func (t *TelegramStateService[Action, Command, Callback]) RegisterMiddlewareHand
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Context, updatesChan tgbotapi.UpdatesChannel) {
+	logrus.Info("start telegram updates handler service")
 	go t.startConsumeQueueChan(ctx)
 
 	for {
@@ -108,6 +110,25 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 			if !ok {
 				return
 			}
+
+			fromChat := update.FromChat()
+			fromUser := update.SentFrom()
+
+			if fromChat == nil {
+				fromChat = &tgbotapi.Chat{}
+			}
+
+			if fromUser == nil {
+				fromUser = &tgbotapi.User{}
+			}
+
+			log := logrus.WithFields(logrus.Fields{
+				"updateID": update.UpdateID,
+				"userID":   fromUser.ID,
+				"chatID":   fromChat.ID,
+			})
+
+			log.Debug("received update from telegram bot")
 
 			chatID := update.FromChat().ID
 			userID := update.SentFrom().ID
@@ -123,7 +144,10 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 				withRateCheck = false
 			}
 
+			log.Debug("try validate rates by this user")
+
 			if withRateCheck && !t.limiter.Check(userID) {
+				log.Debug("rate limit exceeded, skip update")
 				if t.limiterMessageHandler != nil {
 					t.limiterMessageHandler(ctx, &update)
 				}
@@ -131,12 +155,16 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 				return
 			}
 
+			log.Debug("success check rates by this user")
+
 			if _, ok = t.chatRequestChannels[chatID]; !ok {
 				t.chatRequestChannels[chatID] = make(chan tgbotapi.Update, 10)
 			}
 
 			t.chatRequestChannels[chatID] <- update
 			t.processingQueueChan <- chatID
+
+			log.Debug("update successfully queued for processing")
 		}
 	}
 }
@@ -144,18 +172,19 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(ctx context.Context) {
 	processingChan := make(chan tgbotapi.Update)
 
-	for range t.workersCount {
-		go func() {
+	for i := range t.workersCount {
+		go func(workerId int) {
 			for {
 				select {
 				case <-ctx.Done():
 					return
 
 				case update := <-processingChan:
+					logrus.WithField("workerID", workerId).Debug("start processing update")
 					t.handleUpdate(ctx, &update)
 				}
 			}
-		}()
+		}(i)
 	}
 
 	for {
@@ -167,6 +196,12 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 			if !ok {
 				return
 			}
+
+			log := logrus.WithFields(logrus.Fields{
+				"chatID": chatID,
+			})
+
+			log.Debug("try get update from chat queue")
 
 			chatRequestChan, ok := t.chatRequestChannels[chatID]
 
@@ -180,29 +215,44 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 				continue
 			}
 
+			log.WithField("updateID", update.UpdateID).Debug("add update to worker processing queue")
+
 			processingChan <- update
 		}
 	}
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx context.Context, update *tgbotapi.Update) {
+	log := logrus.WithFields(logrus.Fields{
+		"updateID": update.UpdateID,
+	})
+
+	log.Debug("call middleware")
+
 	if t.middlewareFunc != nil && !t.middlewareFunc(ctx, update) {
+		log.Debug("failed call middleware")
 		return
 	}
 
+	log.Debug("middleware called successfully")
+
 	if update.MyChatMember != nil && t.myChatMemberHandler != nil {
+		log.Debug("handle my chat member event")
 		t.myChatMemberHandler(ctx, update)
 	}
 
 	if update.ChatMember != nil && t.chatMemberHandler != nil {
+		log.Debug("handle chat member event")
 		t.chatMemberHandler(ctx, update)
 	}
 
 	if update.Message != nil {
+		log.Debug("handle message event")
 		t.handleMessage(ctx, update)
 	}
 
 	if update.CallbackQuery != nil {
+		log.Debug("handle callback event")
 		t.handleCallback(ctx, update)
 	}
 }
@@ -210,9 +260,21 @@ func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx conte
 func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx context.Context, update *tgbotapi.Update) {
 	ctx = wrapper.FillCtx(ctx, update.FromChat().ID, update.SentFrom().ID)
 
-	callbackHandler, ok := t.callbackHandler[Callback(update.CallbackData())]
+	log := logrus.WithFields(logrus.Fields{
+		"updateID": update.UpdateID,
+		"userID":   update.SentFrom().ID,
+		"chatID":   update.FromChat().ID,
+	})
+
+	log.Debug("check is event contains callback data")
+
+	callback, _ := UnwrapCallbackData[Callback](update.CallbackData())
+
+	callbackHandler, ok := t.callbackHandler[callback]
 
 	if ok {
+		log.WithField("callback", callback).
+			Debug("event contains callback data, call handler")
 		callbackHandler.Handler(ctx, update)
 		return
 	}
@@ -220,14 +282,19 @@ func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx con
 	action, err := t.actionStorage.GetAction(ctx)
 
 	if err != nil {
+		log.WithError(err).Error("failed to get action by user")
 		return
 	}
 
 	actionHandler, ok := t.actionHandler[action]
 
 	if !ok {
+		log.Error("action handler not found")
 		return
 	}
+
+	log.WithField("action", action).
+		Debug("event contains action data, call handler")
 
 	actionHandler.Handler(ctx, update)
 }
