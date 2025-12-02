@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/nejkit/telegram-bot-core/config"
 	"github.com/nejkit/telegram-bot-core/storage"
 	"github.com/nejkit/telegram-bot-core/wrapper"
 )
@@ -18,7 +19,6 @@ type HandlerInfo struct {
 
 type TelegramStateService[Action storage.UserAction, Command string, Callback string] struct {
 	chatRequestChannels map[int64]chan tgbotapi.Update
-	allowedUpdateIDs    map[int64]int
 	processingQueueChan chan int64
 
 	commandHandler  map[Command]HandlerInfo
@@ -26,12 +26,79 @@ type TelegramStateService[Action storage.UserAction, Command string, Callback st
 	callbackHandler map[Callback]HandlerInfo
 
 	chatMemberHandler   HandlerFunc
-	meChatMemberHandler HandlerFunc
+	myChatMemberHandler HandlerFunc
 
 	actionStorage *storage.UserActionStorage[Action]
+	workersCount  int
+}
+
+func NewTelegramStateService[Action storage.UserAction, Command string, Callback string](
+	cfg config.TelegramConfig,
+	actionStorage *storage.UserActionStorage[Action],
+) *TelegramStateService[Action, Command, Callback] {
+	return &TelegramStateService[Action, Command, Callback]{
+		chatRequestChannels: make(map[int64]chan tgbotapi.Update),
+		processingQueueChan: make(chan int64, cfg.WorkersCount),
+		commandHandler:      make(map[Command]HandlerInfo),
+		actionHandler:       make(map[Action]HandlerInfo),
+		callbackHandler:     make(map[Callback]HandlerInfo),
+		chatMemberHandler:   nil,
+		myChatMemberHandler: nil,
+		actionStorage:       actionStorage,
+		workersCount:        cfg.WorkersCount,
+	}
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Context, updatesChan tgbotapi.UpdatesChannel) {
+	go t.startConsumeQueueChan(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case update, ok := <-updatesChan:
+			if !ok {
+				return
+			}
+
+			chatID := update.FromChat().ID
+
+			if update.ChatMember != nil {
+				chatID = update.ChatMember.Chat.ID
+			}
+
+			if update.MyChatMember != nil {
+				chatID = update.MyChatMember.Chat.ID
+			}
+
+			if _, ok = t.chatRequestChannels[chatID]; !ok {
+				t.chatRequestChannels[chatID] = make(chan tgbotapi.Update, 10)
+			}
+
+			t.chatRequestChannels[chatID] <- update
+			t.processingQueueChan <- chatID
+		}
+	}
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(ctx context.Context) {
+	processingChan := make(chan tgbotapi.Update)
+
+	for range t.workersCount {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+
+				case update := <-processingChan:
+					t.handleUpdate(ctx, &update)
+				}
+			}
+		}()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -54,12 +121,20 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 				continue
 			}
 
-			t.handleUpdate(ctx, &update)
+			processingChan <- update
 		}
 	}
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx context.Context, update *tgbotapi.Update) {
+	if update.MyChatMember != nil && t.myChatMemberHandler != nil {
+		t.myChatMemberHandler(ctx, update)
+	}
+
+	if update.ChatMember != nil && t.chatMemberHandler != nil {
+		t.chatMemberHandler(ctx, update)
+	}
+
 	if update.Message != nil {
 		t.handleMessage(ctx, update)
 	}
@@ -67,19 +142,10 @@ func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx conte
 	if update.CallbackQuery != nil {
 		t.handleCallback(ctx, update)
 	}
-
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx context.Context, update *tgbotapi.Update) {
 	ctx = wrapper.FillCtx(ctx, update.FromChat().ID, update.SentFrom().ID)
-
-	if lastUpdate, ok := t.allowedUpdateIDs[update.FromChat().ID]; ok {
-		if lastUpdate > update.UpdateID {
-			return
-		}
-	}
-
-	t.allowedUpdateIDs[update.FromChat().ID] = update.UpdateID
 
 	callbackHandler, ok := t.callbackHandler[Callback(update.CallbackData())]
 
@@ -105,14 +171,6 @@ func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx con
 
 func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx context.Context, update *tgbotapi.Update) {
 	ctx = wrapper.FillCtx(ctx, update.FromChat().ID, update.SentFrom().ID)
-
-	if lastUpdate, ok := t.allowedUpdateIDs[update.FromChat().ID]; ok {
-		if lastUpdate > update.UpdateID {
-			return
-		}
-	}
-
-	t.allowedUpdateIDs[update.FromChat().ID] = update.UpdateID
 
 	cmdHandler, ok := t.commandHandler[Command(update.Message.Command())]
 
