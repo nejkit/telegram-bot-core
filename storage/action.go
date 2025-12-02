@@ -20,6 +20,13 @@ type UserActionStorage[T UserAction] struct {
 	client            *redis.Client
 }
 
+func NewUserActionStorage[T UserAction](
+	botInstancePrefix string,
+	client *redis.Client,
+) *UserActionStorage[T] {
+	return &UserActionStorage[T]{botInstancePrefix: botInstancePrefix, client: client}
+}
+
 func (s *UserActionStorage[T]) SaveAction(ctx context.Context, action T) error {
 	userID, ok := wrapper.GetUserID(ctx)
 

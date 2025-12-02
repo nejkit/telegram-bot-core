@@ -14,6 +14,13 @@ type InvitesStorage struct {
 	client            *redis.Client
 }
 
+func NewInvitesStorage(
+	botInstancePrefix string,
+	client *redis.Client,
+) *InvitesStorage {
+	return &InvitesStorage{botInstancePrefix: botInstancePrefix, client: client}
+}
+
 func (s *InvitesStorage) getInvitesKey(secret string) string {
 	return fmt.Sprintf("%s:user:invite:%s", s.botInstancePrefix, secret)
 }

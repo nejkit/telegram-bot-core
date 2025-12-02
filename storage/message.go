@@ -31,6 +31,13 @@ type UserMessageStorage struct {
 	client            *redis.Client
 }
 
+func NewUserMessageStorage(
+	botInstancePrefix string,
+	client *redis.Client,
+) *UserMessageStorage {
+	return &UserMessageStorage{botInstancePrefix: botInstancePrefix, client: client}
+}
+
 func (s *UserMessageStorage) SaveCallbackMessage(ctx context.Context, callbackID string, chatID int64, messageID int) error {
 	payload := &MessageInfo{
 		MessageID: messageID,
