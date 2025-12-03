@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/nejkit/telegram-bot-core/client"
 	"github.com/nejkit/telegram-bot-core/config"
 	"github.com/nejkit/telegram-bot-core/storage"
 	"github.com/nejkit/telegram-bot-core/wrapper"
@@ -27,6 +28,8 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 	chatRequestChannels map[int64]chan tgbotapi.Update
 	processingQueueChan chan int64
 
+	telegramClient *client.TelegramClient
+
 	commandHandler  map[Command]HandlerInfo
 	actionHandler   map[Action]HandlerInfo
 	callbackHandler map[Callback]HandlerInfo
@@ -37,6 +40,7 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 	limiterMessageHandler HandlerFunc
 
 	actionStorage  *storage.UserActionStorage[Action]
+	messageStorage *storage.UserMessageStorage
 	workersCount   int
 	limiter        *UserLimiter
 	middlewareFunc HandlerFunc
@@ -45,18 +49,135 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Callback CallbackPrefix](
 	cfg config.TelegramConfig,
 	actionStorage *storage.UserActionStorage[Action],
+	messageStorage *storage.UserMessageStorage,
+	client *client.TelegramClient,
 ) *TelegramStateService[Action, Command, Callback] {
-	return &TelegramStateService[Action, Command, Callback]{
+	handler := &TelegramStateService[Action, Command, Callback]{
 		chatRequestChannels: make(map[int64]chan tgbotapi.Update),
 		processingQueueChan: make(chan int64, cfg.WorkersCount),
 		commandHandler:      make(map[Command]HandlerInfo),
 		actionHandler:       make(map[Action]HandlerInfo),
 		callbackHandler:     make(map[Callback]HandlerInfo),
+		telegramClient:      client,
 
-		actionStorage: actionStorage,
-		workersCount:  cfg.WorkersCount,
-		limiter:       NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 0),
+		actionStorage:  actionStorage,
+		messageStorage: messageStorage,
+		workersCount:   cfg.WorkersCount,
+		limiter:        NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 0),
 	}
+
+	handler.callbackHandler["set_previous_keyboard"] = HandlerInfo{
+		Handler: handler.handleSetPreviousKeyboardPage,
+	}
+	handler.callbackHandler["set_next_keyboard"] = HandlerInfo{
+		Handler: handler.handleSetNextKeyboardPage,
+	}
+
+	return handler
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result bool) {
+	result = true
+	messageInfos, err := t.messageStorage.GetUserMessages(ctx)
+
+	if err != nil {
+		logrus.WithError(err).Error("Error getting messages")
+		return
+	}
+
+	for _, messageInfo := range messageInfos {
+		if messageInfo.MessageID == update.CallbackQuery.Message.MessageID {
+			if !messageInfo.InlineKeyboard {
+				logrus.Error("message not contains inline keyboard")
+				return
+			}
+
+			keyboardInfo, err := t.messageStorage.GetKeyboardInfo(ctx, messageInfo.MessageID)
+
+			if err != nil {
+				logrus.WithError(err).Error("Error getting keyboard")
+				return
+			}
+
+			keyboardInfo.CurrentPosition--
+
+			if keyboardInfo.CurrentPosition < 0 {
+				logrus.Error("invalid keyboard idx")
+				return
+			}
+
+			newKeyboard := keyboardInfo.Keyboards[keyboardInfo.CurrentPosition]
+
+			err = t.telegramClient.EditMessage(ctx, messageInfo.MessageID, client.WithInlineKeyboard(newKeyboard))
+
+			if err != nil {
+				logrus.WithError(err).Error("Error editing keyboard")
+				return
+			}
+
+			err = t.messageStorage.SaveKeyboardInfo(ctx, messageInfo.MessageID, keyboardInfo)
+
+			if err != nil {
+				logrus.WithError(err).Error("Error saving keyboard")
+			}
+
+			return
+		}
+	}
+
+	logrus.Warn("not found message id")
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result bool) {
+	result = true
+	messageInfos, err := t.messageStorage.GetUserMessages(ctx)
+
+	if err != nil {
+		logrus.WithError(err).Error("Error getting messages")
+		return
+	}
+
+	for _, messageInfo := range messageInfos {
+		if messageInfo.MessageID == update.CallbackQuery.Message.MessageID {
+			if !messageInfo.InlineKeyboard {
+				logrus.Error("message not contains inline keyboard")
+				return
+			}
+
+			keyboardInfo, err := t.messageStorage.GetKeyboardInfo(ctx, messageInfo.MessageID)
+
+			if err != nil {
+				logrus.WithError(err).Error("Error getting keyboard")
+				return
+			}
+
+			keyboardInfo.CurrentPosition++
+
+			if keyboardInfo.CurrentPosition == len(keyboardInfo.Keyboards) {
+				logrus.Error("invalid keyboard idx")
+				return
+			}
+
+			newKeyboard := keyboardInfo.Keyboards[keyboardInfo.CurrentPosition]
+
+			err = t.telegramClient.EditMessage(ctx, messageInfo.MessageID, client.WithInlineKeyboard(newKeyboard))
+
+			if err != nil {
+				logrus.WithError(err).Error("Error editing keyboard")
+				return
+			}
+
+			err = t.messageStorage.SaveKeyboardInfo(ctx, messageInfo.MessageID, keyboardInfo)
+
+			if err != nil {
+				logrus.WithError(err).Error("Error saving keyboard")
+			}
+
+			return
+		}
+	}
+
+	logrus.Warn("not found message id")
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) RegisterActionHandler(action Action, handler HandlerInfo) *TelegramStateService[Action, Command, Callback] {

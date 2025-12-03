@@ -17,13 +17,17 @@ type KeyboardInfo struct {
 }
 
 type MessageInfo struct {
-	MessageID      int           `json:"message_id"`
-	ChatID         int64         `json:"chat_id"`
-	InlineKeyboard *KeyboardInfo `json:"inline_keyboard,omitempty"`
+	MessageID      int   `json:"message_id"`
+	ChatID         int64 `json:"chat_id"`
+	InlineKeyboard bool  `json:"inline_keyboard,omitempty"`
 }
 
 func (s *UserMessageStorage) getMessagesKey(identifier string) string {
 	return fmt.Sprintf("%s:user:message:%s", s.botInstancePrefix, identifier)
+}
+
+func (s *UserMessageStorage) getKeyboardsKey(userID int64, messageID int) string {
+	return fmt.Sprintf("%s:user:keyboard:%d:%d", s.botInstancePrefix, userID, messageID)
 }
 
 type UserMessageStorage struct {
@@ -79,15 +83,16 @@ func (s *UserMessageStorage) DeleteCallbackMessage(ctx context.Context, callback
 	return s.client.Del(ctx, s.getMessagesKey(callbackID)).Err()
 }
 
-func (s *UserMessageStorage) SaveUserMessage(ctx context.Context, messageID int) error {
+func (s *UserMessageStorage) SaveUserMessage(ctx context.Context, messageID int, withKeyboard bool) error {
 	chatID, ok := wrapper.GetChatID(ctx)
 	if !ok {
 		return domain.ErrorChatNotFilled
 	}
 
 	payload := &MessageInfo{
-		MessageID: messageID,
-		ChatID:    chatID,
+		MessageID:      messageID,
+		ChatID:         chatID,
+		InlineKeyboard: withKeyboard,
 	}
 
 	payloadBytes, err := json.Marshal(payload)
@@ -133,4 +138,51 @@ func (s *UserMessageStorage) DeleteUserMessage(ctx context.Context) error {
 	}
 
 	return s.client.Del(ctx, s.getMessagesKey(fmt.Sprint(chatID))).Err()
+}
+
+func (s *UserMessageStorage) SaveKeyboardInfo(ctx context.Context, messageID int, keyboard *KeyboardInfo) error {
+	chatID, ok := wrapper.GetChatID(ctx)
+	if !ok {
+		return domain.ErrorChatNotFilled
+	}
+
+	rawData, err := json.Marshal(keyboard)
+
+	if err != nil {
+		return err
+	}
+
+	return s.client.Set(ctx, s.getKeyboardsKey(chatID, messageID), rawData, 0).Err()
+}
+
+func (s *UserMessageStorage) GetKeyboardInfo(ctx context.Context, messageID int) (*KeyboardInfo, error) {
+	chatID, ok := wrapper.GetChatID(ctx)
+	if !ok {
+		return nil, domain.ErrorChatNotFilled
+	}
+
+	rawData, err := s.client.Get(ctx, s.getKeyboardsKey(chatID, messageID)).Bytes()
+
+	if err != nil {
+		return nil, err
+	}
+
+	var keyboard KeyboardInfo
+
+	err = json.Unmarshal(rawData, &keyboard)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &keyboard, nil
+}
+
+func (s *UserMessageStorage) DeleteKeyboardInfo(ctx context.Context, messageID int) error {
+	chatID, ok := wrapper.GetChatID(ctx)
+	if !ok {
+		return domain.ErrorChatNotFilled
+	}
+
+	return s.client.Del(ctx, s.getKeyboardsKey(chatID, messageID)).Err()
 }
