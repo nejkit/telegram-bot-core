@@ -20,9 +20,21 @@ type TelegramClient struct {
 type MessageOptions func(msgCfg *tgbotapi.MessageConfig)
 type EditMessageOptions func(msgCfg *tgbotapi.EditMessageTextConfig)
 
-func WithInlineKeyboard(keyboard tgbotapi.InlineKeyboardMarkup) EditMessageOptions {
+func WithSendInlineKeyboard(keyboard tgbotapi.InlineKeyboardMarkup) MessageOptions {
+	return func(msgCfg *tgbotapi.MessageConfig) {
+		msgCfg.ReplyMarkup = keyboard
+	}
+}
+
+func WithEditInlineKeyboard(keyboard tgbotapi.InlineKeyboardMarkup) EditMessageOptions {
 	return func(msgCfg *tgbotapi.EditMessageTextConfig) {
 		msgCfg.ReplyMarkup = &keyboard
+	}
+}
+
+func WithEditMessageText(text string) EditMessageOptions {
+	return func(msgCfg *tgbotapi.EditMessageTextConfig) {
+		msgCfg.Text = text
 	}
 }
 

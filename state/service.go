@@ -126,6 +126,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeybo
 	}
 
 	logrus.Warn("not found message id")
+	return
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result bool) {
@@ -178,6 +179,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardP
 	}
 
 	logrus.Warn("not found message id")
+	return
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) RegisterActionHandler(action Action, handler HandlerInfo) *TelegramStateService[Action, Command, Callback] {
