@@ -5,7 +5,9 @@ import (
 	"strings"
 )
 
-type CallbackPrefix string
+type CallbackPrefix interface {
+	~string
+}
 
 func WrapCallbackData[T CallbackPrefix](prefix T, data string) string {
 	return fmt.Sprintf("%s_%s", prefix, data)

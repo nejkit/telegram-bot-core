@@ -13,14 +13,16 @@ func (s *UserActionStorage[T]) getUserActionsKey(userID int64) string {
 	return fmt.Sprintf("%s:user:action:%d", s.botInstancePrefix, userID)
 }
 
-type UserAction int
+type UserAction interface {
+	~int
+}
 
-type UserActionStorage[T interface{ UserAction }] struct {
+type UserActionStorage[T UserAction] struct {
 	botInstancePrefix string
 	client            *redis.Client
 }
 
-func NewUserActionStorage[T interface{ UserAction }](
+func NewUserActionStorage[T UserAction](
 	botInstancePrefix string,
 	client *redis.Client,
 ) *UserActionStorage[T] {

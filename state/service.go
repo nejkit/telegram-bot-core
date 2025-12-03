@@ -10,6 +10,10 @@ import (
 	"golang.org/x/time/rate"
 )
 
+type BotCommand interface {
+	~string
+}
+
 type HandlerFunc func(ctx context.Context, update *tgbotapi.Update) bool
 
 type ValidatorFunc func(update *tgbotapi.Update) error
@@ -19,7 +23,7 @@ type HandlerInfo struct {
 	MessageValidators []ValidatorFunc
 }
 
-type TelegramStateService[Action interface{ storage.UserAction }, Command string, Callback interface{ CallbackPrefix }] struct {
+type TelegramStateService[Action storage.UserAction, Command BotCommand, Callback CallbackPrefix] struct {
 	chatRequestChannels map[int64]chan tgbotapi.Update
 	processingQueueChan chan int64
 
@@ -38,7 +42,7 @@ type TelegramStateService[Action interface{ storage.UserAction }, Command string
 	middlewareFunc HandlerFunc
 }
 
-func NewTelegramStateService[Action interface{ storage.UserAction }, Command string, Callback interface{ CallbackPrefix }](
+func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Callback CallbackPrefix](
 	cfg config.TelegramConfig,
 	actionStorage *storage.UserActionStorage[Action],
 ) *TelegramStateService[Action, Command, Callback] {
