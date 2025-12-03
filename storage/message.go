@@ -101,7 +101,7 @@ func (s *UserMessageStorage) SaveUserMessage(ctx context.Context, messageID int,
 		return err
 	}
 
-	return s.client.SAdd(ctx, s.getMessagesKey(fmt.Sprint(chatID)), payloadBytes, 0).Err()
+	return s.client.SAdd(ctx, s.getMessagesKey(fmt.Sprint(chatID)), payloadBytes).Err()
 }
 
 func (s *UserMessageStorage) GetUserMessages(ctx context.Context) ([]MessageInfo, error) {

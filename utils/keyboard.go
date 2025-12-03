@@ -89,7 +89,9 @@ func buildInlineKeyboard(
 				)
 			}
 
-			keyboards[pageNumber].InlineKeyboard = append(keyboards[pageNumber].InlineKeyboard, row)
+			if len(row) > 0 {
+				keyboards[pageNumber].InlineKeyboard = append(keyboards[pageNumber].InlineKeyboard, row)
+			}
 		}
 	}
 
