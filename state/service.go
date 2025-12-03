@@ -108,7 +108,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeybo
 
 			newKeyboard := keyboardInfo.Keyboards[keyboardInfo.CurrentPosition]
 
-			err = t.telegramClient.EditMessage(ctx, messageInfo.MessageID, client.WithInlineKeyboard(newKeyboard))
+			err = t.telegramClient.EditMessage(ctx, messageInfo.MessageID, client.WithEditInlineKeyboard(newKeyboard))
 
 			if err != nil {
 				logrus.WithError(err).Error("Error editing keyboard")
@@ -161,7 +161,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardP
 
 			newKeyboard := keyboardInfo.Keyboards[keyboardInfo.CurrentPosition]
 
-			err = t.telegramClient.EditMessage(ctx, messageInfo.MessageID, client.WithInlineKeyboard(newKeyboard))
+			err = t.telegramClient.EditMessage(ctx, messageInfo.MessageID, client.WithEditInlineKeyboard(newKeyboard))
 
 			if err != nil {
 				logrus.WithError(err).Error("Error editing keyboard")
