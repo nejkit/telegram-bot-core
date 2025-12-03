@@ -40,7 +40,7 @@ func (s *UserActionStorage[T]) SaveAction(ctx context.Context, action T) error {
 		return s.client.Del(ctx, s.getUserActionsKey(userID)).Err()
 	}
 
-	return s.client.Set(ctx, s.getUserActionsKey(userID), action, 0).Err()
+	return s.client.Set(ctx, s.getUserActionsKey(userID), int(action), 0).Err()
 }
 
 func (s *UserActionStorage[T]) GetAction(ctx context.Context) (T, error) {
