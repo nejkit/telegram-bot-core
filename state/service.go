@@ -63,7 +63,7 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 		actionStorage:  actionStorage,
 		messageStorage: messageStorage,
 		workersCount:   cfg.WorkersCount,
-		limiter:        NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 0),
+		limiter:        NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 1),
 	}
 
 	handler.callbackHandler["set_previous_keyboard"] = HandlerInfo{
@@ -279,7 +279,7 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 					t.limiterMessageHandler(ctx, &update)
 				}
 
-				return
+				continue
 			}
 
 			log.Debug("success check rates by this user")
