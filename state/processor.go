@@ -59,6 +59,7 @@ func (m *MessageProcessor) Run(ctx context.Context, omitChats <-chan int64) {
 
 			m.mu.Lock()
 			delete(m.processChats, chatID)
+			m.queueManager.Omit(chatID)
 			m.mu.Unlock()
 		}
 	}
