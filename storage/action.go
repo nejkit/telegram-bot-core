@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/nejkit/telegram-bot-core/domain"
-	"github.com/nejkit/telegram-bot-core/wrapper"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -29,13 +27,7 @@ func NewUserActionStorage[T UserAction](
 	return &UserActionStorage[T]{botInstancePrefix: botInstancePrefix, client: client}
 }
 
-func (s *UserActionStorage[T]) SaveAction(ctx context.Context, action T) error {
-	userID, ok := wrapper.GetUserID(ctx)
-
-	if !ok {
-		return domain.ErrorCallerNotFilled
-	}
-
+func (s *UserActionStorage[T]) SaveAction(ctx context.Context, userID int64, action T) error {
 	if action == 0 {
 		return s.client.Del(ctx, s.getUserActionsKey(userID)).Err()
 	}
@@ -43,13 +35,7 @@ func (s *UserActionStorage[T]) SaveAction(ctx context.Context, action T) error {
 	return s.client.Set(ctx, s.getUserActionsKey(userID), int(action), 0).Err()
 }
 
-func (s *UserActionStorage[T]) GetAction(ctx context.Context) (T, error) {
-	userID, ok := wrapper.GetUserID(ctx)
-
-	if !ok {
-		return 0, domain.ErrorCallerNotFilled
-	}
-
+func (s *UserActionStorage[T]) GetAction(ctx context.Context, userID int64) (T, error) {
 	action, err := s.client.Get(ctx, s.getUserActionsKey(userID)).Int()
 
 	if errors.Is(err, redis.Nil) {
@@ -63,8 +49,8 @@ func (s *UserActionStorage[T]) GetAction(ctx context.Context) (T, error) {
 	return T(action), err
 }
 
-func (s *UserActionStorage[T]) SaveActionWithRollback(ctx context.Context, action T) (func(err error) error, error) {
-	rollbackToAction, err := s.GetAction(ctx)
+func (s *UserActionStorage[T]) SaveActionWithRollback(ctx context.Context, userID int64, action T) (func(err error) error, error) {
+	rollbackToAction, err := s.GetAction(ctx, userID)
 
 	if err != nil {
 		return nil, err
@@ -72,12 +58,12 @@ func (s *UserActionStorage[T]) SaveActionWithRollback(ctx context.Context, actio
 
 	rollbackFunc := func(err error) error {
 		if err != nil {
-			return s.SaveAction(ctx, rollbackToAction)
+			return s.SaveAction(ctx, userID, rollbackToAction)
 		}
 		return nil
 	}
 
-	err = s.SaveAction(ctx, action)
+	err = s.SaveAction(ctx, userID, action)
 
 	if err != nil {
 		return nil, rollbackFunc(err)

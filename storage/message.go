@@ -7,7 +7,6 @@ import (
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/nejkit/telegram-bot-core/domain"
-	"github.com/nejkit/telegram-bot-core/wrapper"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -83,12 +82,7 @@ func (s *UserMessageStorage) DeleteCallbackMessage(ctx context.Context, callback
 	return s.client.Del(ctx, s.getMessagesKey(callbackID)).Err()
 }
 
-func (s *UserMessageStorage) SaveUserMessage(ctx context.Context, messageID int, withKeyboard bool) error {
-	chatID, ok := wrapper.GetChatID(ctx)
-	if !ok {
-		return domain.ErrorChatNotFilled
-	}
-
+func (s *UserMessageStorage) SaveUserMessage(ctx context.Context, chatID int64, messageID int, withKeyboard bool) error {
 	payload := &MessageInfo{
 		MessageID:      messageID,
 		ChatID:         chatID,
@@ -104,12 +98,7 @@ func (s *UserMessageStorage) SaveUserMessage(ctx context.Context, messageID int,
 	return s.client.SAdd(ctx, s.getMessagesKey(fmt.Sprint(chatID)), payloadBytes).Err()
 }
 
-func (s *UserMessageStorage) GetUserMessages(ctx context.Context) ([]MessageInfo, error) {
-	chatID, ok := wrapper.GetChatID(ctx)
-	if !ok {
-		return nil, domain.ErrorChatNotFilled
-	}
-
+func (s *UserMessageStorage) GetUserMessages(ctx context.Context, chatID int64) ([]MessageInfo, error) {
 	rawMessages, err := s.client.SMembers(ctx, s.getMessagesKey(fmt.Sprint(chatID))).Result()
 
 	if err != nil {
@@ -131,21 +120,11 @@ func (s *UserMessageStorage) GetUserMessages(ctx context.Context) ([]MessageInfo
 	return messages, nil
 }
 
-func (s *UserMessageStorage) DeleteUserMessage(ctx context.Context) error {
-	chatID, ok := wrapper.GetChatID(ctx)
-	if !ok {
-		return domain.ErrorChatNotFilled
-	}
-
+func (s *UserMessageStorage) DeleteUserMessage(ctx context.Context, chatID int64) error {
 	return s.client.Del(ctx, s.getMessagesKey(fmt.Sprint(chatID))).Err()
 }
 
-func (s *UserMessageStorage) SaveKeyboardInfo(ctx context.Context, messageID int, keyboard *KeyboardInfo) error {
-	chatID, ok := wrapper.GetChatID(ctx)
-	if !ok {
-		return domain.ErrorChatNotFilled
-	}
-
+func (s *UserMessageStorage) SaveKeyboardInfo(ctx context.Context, chatID int64, messageID int, keyboard *KeyboardInfo) error {
 	rawData, err := json.Marshal(keyboard)
 
 	if err != nil {
@@ -155,12 +134,7 @@ func (s *UserMessageStorage) SaveKeyboardInfo(ctx context.Context, messageID int
 	return s.client.Set(ctx, s.getKeyboardsKey(chatID, messageID), rawData, 0).Err()
 }
 
-func (s *UserMessageStorage) GetKeyboardInfo(ctx context.Context, messageID int) (*KeyboardInfo, error) {
-	chatID, ok := wrapper.GetChatID(ctx)
-	if !ok {
-		return nil, domain.ErrorChatNotFilled
-	}
-
+func (s *UserMessageStorage) GetKeyboardInfo(ctx context.Context, chatID int64, messageID int) (*KeyboardInfo, error) {
 	rawData, err := s.client.Get(ctx, s.getKeyboardsKey(chatID, messageID)).Bytes()
 
 	if err != nil {
@@ -178,11 +152,6 @@ func (s *UserMessageStorage) GetKeyboardInfo(ctx context.Context, messageID int)
 	return &keyboard, nil
 }
 
-func (s *UserMessageStorage) DeleteKeyboardInfo(ctx context.Context, messageID int) error {
-	chatID, ok := wrapper.GetChatID(ctx)
-	if !ok {
-		return domain.ErrorChatNotFilled
-	}
-
+func (s *UserMessageStorage) DeleteKeyboardInfo(ctx context.Context, chatID int64, messageID int) error {
 	return s.client.Del(ctx, s.getKeyboardsKey(chatID, messageID)).Err()
 }
