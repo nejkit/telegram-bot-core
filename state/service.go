@@ -349,7 +349,7 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 
 			if chatID == 0 {
 				ticker.Reset(time.Millisecond * 100)
-				return
+				continue
 			}
 
 			log := logrus.WithFields(logrus.Fields{
@@ -368,12 +368,14 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 			update, ok := <-chatRequestChan
 
 			if !ok {
+				ticker.Reset(time.Millisecond * 10)
 				continue
 			}
 
 			log.WithField("updateID", update.UpdateID).Debug("add update to worker processing queue")
 
 			processingChan <- update
+			ticker.Reset(time.Millisecond * 10)
 		}
 	}
 }
