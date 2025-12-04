@@ -9,6 +9,7 @@ import (
 	"github.com/nejkit/telegram-bot-core/wrapper"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
+	"time"
 )
 
 type BotCommand interface {
@@ -44,6 +45,7 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 	workersCount   int
 	limiter        *UserLimiter
 	middlewareFunc HandlerFunc
+	processor      *MessageProcessor
 }
 
 func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Callback CallbackPrefix](
@@ -64,6 +66,7 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 		messageStorage: messageStorage,
 		workersCount:   cfg.WorkersCount,
 		limiter:        NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 1),
+		processor:      NewMessageProcessor(),
 	}
 
 	handler.callbackHandler["set_previous_keyboard"] = HandlerInfo{
@@ -249,14 +252,6 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 				fromUser = &tgbotapi.User{}
 			}
 
-			log := logrus.WithFields(logrus.Fields{
-				"updateID": update.UpdateID,
-				"userID":   fromUser.ID,
-				"chatID":   fromChat.ID,
-			})
-
-			log.Debug("received update from telegram bot")
-
 			chatID := update.FromChat().ID
 			userID := update.SentFrom().ID
 			withRateCheck := true
@@ -271,7 +266,13 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 				withRateCheck = false
 			}
 
-			log.Debug("try validate rates by this user")
+			log := logrus.WithFields(logrus.Fields{
+				"updateID": update.UpdateID,
+				"userID":   userID,
+				"chatID":   chatID,
+			})
+
+			log.Debug("received update from telegram bot")
 
 			if withRateCheck && !t.limiter.Check(userID) {
 				log.Debug("rate limit exceeded, skip update")
@@ -289,7 +290,7 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 			}
 
 			t.chatRequestChannels[chatID] <- update
-			t.processingQueueChan <- chatID
+			t.processor.PutChat(chatID)
 
 			log.Debug("update successfully queued for processing")
 		}
@@ -297,7 +298,10 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(ctx context.Context) {
-	processingChan := make(chan tgbotapi.Update)
+	processingChan := make(chan tgbotapi.Update, t.workersCount)
+	omitChatIdsChan := make(chan int64, t.workersCount)
+
+	go t.processor.Run(ctx, omitChatIdsChan)
 
 	for i := range t.workersCount {
 		go func(workerId int) {
@@ -309,18 +313,42 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 				case update := <-processingChan:
 					logrus.WithField("workerID", workerId).Debug("start processing update")
 					t.handleUpdate(ctx, &update)
+					logrus.WithField("workerID", workerId).Debug("finished processing update")
+					chatInfo := update.FromChat()
+
+					if chatInfo == nil {
+						if update.ChatMember != nil {
+							chatInfo = &tgbotapi.Chat{ID: update.ChatMember.Chat.ID}
+						}
+						if update.MyChatMember != nil {
+							chatInfo = &tgbotapi.Chat{ID: update.MyChatMember.Chat.ID}
+						}
+					}
+
+					if chatInfo == nil {
+						panic("")
+					}
+
+					omitChatIdsChan <- chatInfo.ID
 				}
 			}
 		}(i)
 	}
+
+	ticker := time.NewTicker(time.Millisecond * 10)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
-		case chatID, ok := <-t.processingQueueChan:
-			if !ok {
+		case <-ticker.C:
+			ticker.Stop()
+
+			chatID := t.processor.GetChat()
+
+			if chatID == 0 {
+				ticker.Reset(time.Millisecond * 100)
 				return
 			}
 
@@ -333,6 +361,7 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 			chatRequestChan, ok := t.chatRequestChannels[chatID]
 
 			if !ok {
+				ticker.Reset(time.Millisecond * 10)
 				continue
 			}
 
