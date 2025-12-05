@@ -2,6 +2,7 @@ package locale
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/sirupsen/logrus"
 	"io"
 	"os"
@@ -44,13 +45,13 @@ func NewLocalizationProvider(filePath string) *LocalizationProvider {
 	}
 }
 
-func (l *LocalizationProvider) GetDefaultLocalization(key string) string {
+func (l *LocalizationProvider) GetDefaultLocalization(key string, args ...any) string {
 	defaultCulture := l.locales.DefaultCulture
 
-	return l.GetWithCulture(defaultCulture, key)
+	return l.GetWithCulture(defaultCulture, key, args...)
 }
 
-func (l *LocalizationProvider) GetWithCulture(culture, key string) string {
+func (l *LocalizationProvider) GetWithCulture(culture, key string, args ...any) string {
 	contentLocalizations, ok := l.locales.LocalizedContent[key]
 
 	if !ok {
@@ -60,7 +61,15 @@ func (l *LocalizationProvider) GetWithCulture(culture, key string) string {
 	content, ok := contentLocalizations[culture]
 
 	if !ok {
-		content = contentLocalizations[l.locales.DefaultCulture]
+		content, ok = contentLocalizations[l.locales.DefaultCulture]
+
+		if !ok {
+			return key
+		}
+	}
+
+	if len(args) > 0 {
+		return fmt.Sprintf(content, args...)
 	}
 
 	return content
