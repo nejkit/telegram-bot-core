@@ -6,7 +6,6 @@ import (
 	"github.com/nejkit/telegram-bot-core/client"
 	"github.com/nejkit/telegram-bot-core/config"
 	"github.com/nejkit/telegram-bot-core/storage"
-	"github.com/nejkit/telegram-bot-core/wrapper"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	"time"
@@ -81,7 +80,8 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 
 func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result bool) {
 	result = true
-	messageInfos, err := t.messageStorage.GetUserMessages(ctx)
+	userID := update.SentFrom().ID
+	messageInfos, err := t.messageStorage.GetUserMessages(ctx, userID)
 
 	if err != nil {
 		logrus.WithError(err).Error("Error getting messages")
@@ -95,7 +95,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeybo
 				return
 			}
 
-			keyboardInfo, err := t.messageStorage.GetKeyboardInfo(ctx, messageInfo.MessageID)
+			keyboardInfo, err := t.messageStorage.GetKeyboardInfo(ctx, userID, messageInfo.MessageID)
 
 			if err != nil {
 				logrus.WithError(err).Error("Error getting keyboard")
@@ -118,7 +118,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeybo
 				return
 			}
 
-			err = t.messageStorage.SaveKeyboardInfo(ctx, messageInfo.MessageID, keyboardInfo)
+			err = t.messageStorage.SaveKeyboardInfo(ctx, userID, messageInfo.MessageID, keyboardInfo)
 
 			if err != nil {
 				logrus.WithError(err).Error("Error saving keyboard")
@@ -134,7 +134,8 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeybo
 
 func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result bool) {
 	result = true
-	messageInfos, err := t.messageStorage.GetUserMessages(ctx)
+	userID := update.SentFrom().ID
+	messageInfos, err := t.messageStorage.GetUserMessages(ctx, userID)
 
 	if err != nil {
 		logrus.WithError(err).Error("Error getting messages")
@@ -148,7 +149,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardP
 				return
 			}
 
-			keyboardInfo, err := t.messageStorage.GetKeyboardInfo(ctx, messageInfo.MessageID)
+			keyboardInfo, err := t.messageStorage.GetKeyboardInfo(ctx, userID, messageInfo.MessageID)
 
 			if err != nil {
 				logrus.WithError(err).Error("Error getting keyboard")
@@ -171,7 +172,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardP
 				return
 			}
 
-			err = t.messageStorage.SaveKeyboardInfo(ctx, messageInfo.MessageID, keyboardInfo)
+			err = t.messageStorage.SaveKeyboardInfo(ctx, userID, messageInfo.MessageID, keyboardInfo)
 
 			if err != nil {
 				logrus.WithError(err).Error("Error saving keyboard")
@@ -416,11 +417,10 @@ func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx conte
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx context.Context, update *tgbotapi.Update) {
-	ctx = wrapper.FillCtx(ctx, update.FromChat().ID, update.SentFrom().ID)
-
+	userID := update.SentFrom().ID
 	log := logrus.WithFields(logrus.Fields{
 		"updateID": update.UpdateID,
-		"userID":   update.SentFrom().ID,
+		"userID":   userID,
 		"chatID":   update.FromChat().ID,
 	})
 
@@ -437,7 +437,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx con
 		return
 	}
 
-	action, err := t.actionStorage.GetAction(ctx)
+	action, err := t.actionStorage.GetAction(ctx, userID)
 
 	if err != nil {
 		log.WithError(err).Error("failed to get action by user")
@@ -458,8 +458,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx con
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx context.Context, update *tgbotapi.Update) {
-	ctx = wrapper.FillCtx(ctx, update.FromChat().ID, update.SentFrom().ID)
-
+	userID := update.SentFrom().ID
 	cmdHandler, ok := t.commandHandler[Command(update.Message.Command())]
 
 	if ok {
@@ -467,7 +466,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 		return
 	}
 
-	action, err := t.actionStorage.GetAction(ctx)
+	action, err := t.actionStorage.GetAction(ctx, userID)
 
 	if err != nil {
 		return

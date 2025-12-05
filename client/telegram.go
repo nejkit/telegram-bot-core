@@ -1,11 +1,8 @@
 package client
 
 import (
-	"context"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/nejkit/telegram-bot-core/config"
-	"github.com/nejkit/telegram-bot-core/domain"
-	"github.com/nejkit/telegram-bot-core/wrapper"
 	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
@@ -57,13 +54,7 @@ func NewTelegramClient(cfg *config.TelegramConfig) *TelegramClient {
 	}
 }
 
-func (t *TelegramClient) SendMessage(ctx context.Context, messageText string, options ...MessageOptions) (int, error) {
-	recipientChatID, ok := wrapper.GetChatID(ctx)
-
-	if !ok {
-		return 0, domain.ErrorChatNotFilled
-	}
-
+func (t *TelegramClient) SendMessage(recipientChatID int64, messageText string, options ...MessageOptions) (int, error) {
 	cfg := tgbotapi.NewMessage(recipientChatID, messageText)
 
 	for _, opt := range options {
@@ -79,13 +70,7 @@ func (t *TelegramClient) SendMessage(ctx context.Context, messageText string, op
 	return response.MessageID, nil
 }
 
-func (t *TelegramClient) EditMessage(ctx context.Context, messageID int, options ...EditMessageOptions) error {
-	recipientChatID, ok := wrapper.GetChatID(ctx)
-
-	if !ok {
-		return domain.ErrorChatNotFilled
-	}
-
+func (t *TelegramClient) EditMessage(recipientChatID int64, messageID int, options ...EditMessageOptions) error {
 	cfg := &tgbotapi.EditMessageTextConfig{
 		BaseEdit: tgbotapi.BaseEdit{
 			ChatID:    recipientChatID,
@@ -102,13 +87,7 @@ func (t *TelegramClient) EditMessage(ctx context.Context, messageID int, options
 	return err
 }
 
-func (t *TelegramClient) DeleteMessage(ctx context.Context, messageID int) error {
-	recipientChatID, ok := wrapper.GetChatID(ctx)
-
-	if !ok {
-		return domain.ErrorChatNotFilled
-	}
-
+func (t *TelegramClient) DeleteMessage(recipientChatID int64, messageID int) error {
 	cfg := tgbotapi.NewDeleteMessage(recipientChatID, messageID)
 
 	_, err := t.api.Request(cfg)
@@ -116,13 +95,7 @@ func (t *TelegramClient) DeleteMessage(ctx context.Context, messageID int) error
 	return err
 }
 
-func (t *TelegramClient) UploadFile(ctx context.Context, fileName string, fileContent []byte) (int, error) {
-	recipientChatID, ok := wrapper.GetChatID(ctx)
-
-	if !ok {
-		return 0, domain.ErrorChatNotFilled
-	}
-
+func (t *TelegramClient) UploadFile(recipientChatID int64, fileName string, fileContent []byte) (int, error) {
 	cfg := tgbotapi.NewDocument(recipientChatID, tgbotapi.FileBytes{
 		Name:  fileName,
 		Bytes: fileContent,
