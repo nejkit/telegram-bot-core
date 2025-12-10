@@ -15,7 +15,9 @@ type BotCommand interface {
 	~string
 }
 
-type HandlerFunc func(ctx context.Context, update *tgbotapi.Update) bool
+type HandlerFunc func(ctx context.Context, update *tgbotapi.Update) error
+
+type MiddlewareFunc func(ctx context.Context, update *tgbotapi.Update) (context.Context, bool)
 
 type ValidatorFunc func(update *tgbotapi.Update) error
 
@@ -43,7 +45,7 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 	messageStorage *storage.UserMessageStorage
 	workersCount   int
 	limiter        *UserLimiter
-	middlewareFunc HandlerFunc
+	middlewareFunc MiddlewareFunc
 	processor      *MessageProcessor
 }
 
@@ -78,8 +80,8 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 	return handler
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result bool) {
-	result = true
+func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result error) {
+	result = nil
 	userID := update.FromChat().ID
 	messageInfos, err := t.messageStorage.GetUserMessages(ctx, userID)
 
@@ -132,8 +134,8 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeybo
 	return
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result bool) {
-	result = true
+func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result error) {
+	result = nil
 	userID := update.FromChat().ID
 	messageInfos, err := t.messageStorage.GetUserMessages(ctx, userID)
 
@@ -186,20 +188,29 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardP
 	return
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) RegisterActionHandler(action Action, handler HandlerInfo) *TelegramStateService[Action, Command, Callback] {
-	t.actionHandler[action] = handler
+func (t *TelegramStateService[Action, Command, Callback]) RegisterActionHandler(action Action, handler HandlerFunc, validators ...ValidatorFunc) *TelegramStateService[Action, Command, Callback] {
+	t.actionHandler[action] = HandlerInfo{
+		Handler:           handler,
+		MessageValidators: validators,
+	}
 
 	return t
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) RegisterCommandHandler(cmd Command, handler HandlerInfo) *TelegramStateService[Action, Command, Callback] {
-	t.commandHandler[cmd] = handler
+func (t *TelegramStateService[Action, Command, Callback]) RegisterCommandHandler(cmd Command, handler HandlerFunc, validators ...ValidatorFunc) *TelegramStateService[Action, Command, Callback] {
+	t.commandHandler[cmd] = HandlerInfo{
+		Handler:           handler,
+		MessageValidators: validators,
+	}
 
 	return t
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) RegisterCallbackHandler(callback Callback, handler HandlerInfo) *TelegramStateService[Action, Command, Callback] {
-	t.callbackHandler[callback] = handler
+func (t *TelegramStateService[Action, Command, Callback]) RegisterCallbackHandler(callback Callback, handler HandlerFunc, validators ...ValidatorFunc) *TelegramStateService[Action, Command, Callback] {
+	t.callbackHandler[callback] = HandlerInfo{
+		Handler:           handler,
+		MessageValidators: validators,
+	}
 
 	return t
 }
@@ -222,7 +233,7 @@ func (t *TelegramStateService[Action, Command, Callback]) RegisterLimiterHandler
 	return t
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) RegisterMiddlewareHandler(handler HandlerFunc) *TelegramStateService[Action, Command, Callback] {
+func (t *TelegramStateService[Action, Command, Callback]) RegisterMiddlewareHandler(handler MiddlewareFunc) *TelegramStateService[Action, Command, Callback] {
 	t.middlewareFunc = handler
 
 	return t
@@ -278,7 +289,9 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 			if withRateCheck && !t.limiter.Check(userID) {
 				log.Debug("rate limit exceeded, skip update")
 				if t.limiterMessageHandler != nil {
-					t.limiterMessageHandler(ctx, &update)
+					if err := t.limiterMessageHandler(ctx, &update); err != nil {
+						log.WithError(err).Error("failed execute limiter message handler")
+					}
 				}
 
 				continue
@@ -386,23 +399,32 @@ func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx conte
 		"updateID": update.UpdateID,
 	})
 
-	log.Debug("call middleware")
+	if t.middlewareFunc != nil {
+		log.Debug("try call middleware")
+		var isSuccess bool
 
-	if t.middlewareFunc != nil && !t.middlewareFunc(ctx, update) {
-		log.Debug("failed call middleware")
-		return
+		ctx, isSuccess = t.middlewareFunc(ctx, update)
+
+		if !isSuccess {
+			log.Debug("failed call middleware")
+			return
+		}
+
+		log.Debug("middleware called successfully")
 	}
-
-	log.Debug("middleware called successfully")
 
 	if update.MyChatMember != nil && t.myChatMemberHandler != nil {
 		log.Debug("handle my chat member event")
-		t.myChatMemberHandler(ctx, update)
+		if err := t.myChatMemberHandler(ctx, update); err != nil {
+			log.WithError(err).Error("failed handle my chat member event")
+		}
 	}
 
 	if update.ChatMember != nil && t.chatMemberHandler != nil {
 		log.Debug("handle chat member event")
-		t.chatMemberHandler(ctx, update)
+		if err := t.chatMemberHandler(ctx, update); err != nil {
+			log.WithError(err).Error("failed handle chat member event")
+		}
 	}
 
 	if update.Message != nil {
@@ -433,7 +455,11 @@ func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx con
 	if ok {
 		log.WithField("callback", callback).
 			Debug("event contains callback data, call handler")
-		callbackHandler.Handler(ctx, update)
+		err := callbackHandler.Handler(ctx, update)
+
+		if err != nil {
+			log.WithError(err).Error("failed handle callback event")
+		}
 		return
 	}
 
@@ -454,15 +480,33 @@ func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx con
 	log.WithField("action", action).
 		Debug("event contains action data, call handler")
 
-	actionHandler.Handler(ctx, update)
+	err = actionHandler.Handler(ctx, update)
+
+	if err != nil {
+		log.WithError(err).Error("failed handle action callback event")
+	}
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx context.Context, update *tgbotapi.Update) {
 	userID := update.SentFrom().ID
+	log := logrus.WithFields(logrus.Fields{
+		"updateID": update.UpdateID,
+		"userID":   userID,
+		"chatID":   update.FromChat().ID,
+	})
+
+	log.Debug("check is event is bot command")
+
 	cmdHandler, ok := t.commandHandler[Command(update.Message.Command())]
 
 	if ok {
-		cmdHandler.Handler(ctx, update)
+		log.WithField("command", update.Message.Command()).
+			Debug("event is bot command, call handler")
+		err := cmdHandler.Handler(ctx, update)
+
+		if err != nil {
+			log.WithError(err).Error("failed handle command event")
+		}
 		return
 	}
 
@@ -475,21 +519,39 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 	actionHandler, ok := t.actionHandler[action]
 
 	if !ok {
+		log.Error("action handler not found")
 		return
 	}
 
 	isCancel := update.Message.IsCommand() && update.Message.Command() != "cancel"
 
 	if isCancel {
-		actionHandler.Handler(ctx, update)
+		log.WithField("action", action).
+			Debug("event is cancel command, call handler")
+
+		err = actionHandler.Handler(ctx, update)
+
+		if err != nil {
+			log.WithError(err).Error("failed handle cancel command event")
+		}
+
 		return
 	}
 
+	log.WithField("action", action).Debug("try process validations before call handler")
+
 	for _, validator := range actionHandler.MessageValidators {
 		if err := validator(update); err != nil {
+			log.WithError(err).Error("failed validate update")
 			return
 		}
 	}
 
-	actionHandler.Handler(ctx, update)
+	log.WithField("action", action).Debug("validations processed, call handler")
+
+	err = actionHandler.Handler(ctx, update)
+
+	if err != nil {
+		log.WithError(err).Error("failed handle event")
+	}
 }
