@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/nejkit/telegram-bot-core/config"
 	"github.com/sirupsen/logrus"
@@ -152,6 +153,16 @@ func (t *TelegramClient) AnswerCallback(callbackID, messageText string) error {
 	_, err := t.api.Request(cfg)
 
 	return err
+}
+
+func (t *TelegramClient) GetInviteLink(secret string) (string, error) {
+	me, err := t.api.GetMe()
+
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("https://telegram.me/%s?start=%s", me.UserName, secret), nil
 }
 
 func (t *TelegramClient) GetBotCommands(fromChatID int64) ([]tgbotapi.BotCommand, error) {
