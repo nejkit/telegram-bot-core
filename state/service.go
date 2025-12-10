@@ -28,7 +28,7 @@ type HandlerInfo struct {
 
 type TelegramStateService[Action storage.UserAction, Command BotCommand, Callback CallbackPrefix] struct {
 	chatRequestChannels map[int64]chan tgbotapi.Update
-	processingQueueChan chan int64
+	processingQueueChan chan struct{}
 
 	telegramClient *client.TelegramClient
 
@@ -57,7 +57,7 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 ) *TelegramStateService[Action, Command, Callback] {
 	handler := &TelegramStateService[Action, Command, Callback]{
 		chatRequestChannels: make(map[int64]chan tgbotapi.Update),
-		processingQueueChan: make(chan int64, cfg.WorkersCount),
+		processingQueueChan: make(chan struct{}, cfg.WorkersCount),
 		commandHandler:      make(map[Command]HandlerInfo),
 		actionHandler:       make(map[Action]HandlerInfo),
 		callbackHandler:     make(map[Callback]HandlerInfo),
@@ -305,6 +305,7 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 
 			t.chatRequestChannels[chatID] <- update
 			t.processor.PutChat(chatID)
+			t.processingQueueChan <- struct{}{}
 
 			log.Debug("update successfully queued for processing")
 		}
@@ -349,12 +350,47 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 		}(i)
 	}
 
-	ticker := time.NewTicker(time.Millisecond * 10)
+	ticker := time.NewTicker(time.Millisecond * 100)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+
+		case <-t.processingQueueChan:
+			ticker.Stop()
+
+			chatID := t.processor.GetChat()
+
+			if chatID == 0 {
+				ticker.Reset(time.Millisecond * 100)
+				continue
+			}
+
+			log := logrus.WithFields(logrus.Fields{
+				"chatID": chatID,
+			})
+
+			log.Debug("try get update from chat queue")
+
+			chatRequestChan, ok := t.chatRequestChannels[chatID]
+
+			if !ok {
+				ticker.Reset(time.Millisecond * 100)
+				continue
+			}
+
+			update, ok := <-chatRequestChan
+
+			if !ok {
+				ticker.Reset(time.Millisecond * 100)
+				continue
+			}
+
+			log.WithField("updateID", update.UpdateID).Debug("add update to worker processing queue")
+
+			processingChan <- update
+			ticker.Reset(time.Millisecond * 100)
 
 		case <-ticker.C:
 			ticker.Stop()
@@ -375,21 +411,21 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 			chatRequestChan, ok := t.chatRequestChannels[chatID]
 
 			if !ok {
-				ticker.Reset(time.Millisecond * 10)
+				ticker.Reset(time.Millisecond * 100)
 				continue
 			}
 
 			update, ok := <-chatRequestChan
 
 			if !ok {
-				ticker.Reset(time.Millisecond * 10)
+				ticker.Reset(time.Millisecond * 100)
 				continue
 			}
 
 			log.WithField("updateID", update.UpdateID).Debug("add update to worker processing queue")
 
 			processingChan <- update
-			ticker.Reset(time.Millisecond * 10)
+			ticker.Reset(time.Millisecond * 100)
 		}
 	}
 }
