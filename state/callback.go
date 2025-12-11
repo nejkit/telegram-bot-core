@@ -14,7 +14,7 @@ func WrapCallbackData[T CallbackPrefix](prefix T, data string) string {
 }
 
 func UnwrapCallbackData[T CallbackPrefix](data string) (T, string) {
-	dataParts := strings.SplitN(data, "_", 2)
+	dataParts := strings.Split(data, "_")
 
 	if len(dataParts) != 2 {
 		return T(""), ""
