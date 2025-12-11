@@ -1,6 +1,8 @@
 package state
 
 import (
+	"context"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	"sync"
 )
@@ -27,6 +29,27 @@ func NewUserLimiter(rateLimit rate.Limit, burst int) *UserLimiter {
 		burst:     burst,
 		isEnabled: true,
 	}
+}
+
+func (u *UserLimiter) Wait(ctx context.Context, userID int64) {
+	if !u.isEnabled {
+		return
+	}
+
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	limiter, ok := u.limits[userID]
+	if !ok {
+		limiter = rate.NewLimiter(u.rate, u.burst)
+		u.limits[userID] = limiter
+	}
+
+	if err := limiter.Wait(ctx); err != nil {
+		logrus.WithError(err).Error("error wait limiter")
+	}
+
+	return
 }
 
 func (u *UserLimiter) Check(userID int64) bool {

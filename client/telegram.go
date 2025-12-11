@@ -1,18 +1,25 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/nejkit/telegram-bot-core/config"
+	"github.com/nejkit/telegram-bot-core/state"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 	"io"
 	"net/http"
 	"path/filepath"
+	"time"
 )
 
 type TelegramClient struct {
 	api            *tgbotapi.BotAPI
 	allowedUpdates []string
+
+	chatLimiter   *state.UserLimiter
+	globalLimiter *rate.Limiter
 }
 
 type MessageOptions func(msgCfg *tgbotapi.MessageConfig)
@@ -52,15 +59,23 @@ func NewTelegramClient(cfg *config.TelegramConfig) *TelegramClient {
 	return &TelegramClient{
 		api:            botApi,
 		allowedUpdates: cfg.AllowedUpdates,
+		globalLimiter:  rate.NewLimiter(25, 25),
+		chatLimiter:    state.NewUserLimiter(rate.Every(time.Second), 1),
 	}
 }
 
-func (t *TelegramClient) SendMessage(recipientChatID int64, messageText string, options ...MessageOptions) (int, error) {
+func (t *TelegramClient) SendMessage(ctx context.Context, recipientChatID int64, messageText string, options ...MessageOptions) (int, error) {
 	cfg := tgbotapi.NewMessage(recipientChatID, messageText)
 
 	for _, opt := range options {
 		opt(&cfg)
 	}
+
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return 0, err
+	}
+
+	t.chatLimiter.Wait(ctx, recipientChatID)
 
 	response, err := t.api.Send(cfg)
 
@@ -71,7 +86,7 @@ func (t *TelegramClient) SendMessage(recipientChatID int64, messageText string, 
 	return response.MessageID, nil
 }
 
-func (t *TelegramClient) EditMessage(recipientChatID int64, messageID int, options ...EditMessageOptions) error {
+func (t *TelegramClient) EditMessage(ctx context.Context, recipientChatID int64, messageID int, options ...EditMessageOptions) error {
 	cfg := &tgbotapi.EditMessageTextConfig{
 		BaseEdit: tgbotapi.BaseEdit{
 			ChatID:    recipientChatID,
@@ -83,24 +98,42 @@ func (t *TelegramClient) EditMessage(recipientChatID int64, messageID int, optio
 		opt(cfg)
 	}
 
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return err
+	}
+
+	t.chatLimiter.Wait(ctx, recipientChatID)
+
 	_, err := t.api.Send(cfg)
 
 	return err
 }
 
-func (t *TelegramClient) DeleteMessage(recipientChatID int64, messageID int) error {
+func (t *TelegramClient) DeleteMessage(ctx context.Context, recipientChatID int64, messageID int) error {
 	cfg := tgbotapi.NewDeleteMessage(recipientChatID, messageID)
+
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return err
+	}
+
+	t.chatLimiter.Wait(ctx, recipientChatID)
 
 	_, err := t.api.Request(cfg)
 
 	return err
 }
 
-func (t *TelegramClient) UploadFile(recipientChatID int64, fileName string, fileContent []byte) (int, error) {
+func (t *TelegramClient) UploadFile(ctx context.Context, recipientChatID int64, fileName string, fileContent []byte) (int, error) {
 	cfg := tgbotapi.NewDocument(recipientChatID, tgbotapi.FileBytes{
 		Name:  fileName,
 		Bytes: fileContent,
 	})
+
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return 0, err
+	}
+
+	t.chatLimiter.Wait(ctx, recipientChatID)
 
 	response, err := t.api.Send(cfg)
 
@@ -111,7 +144,11 @@ func (t *TelegramClient) UploadFile(recipientChatID int64, fileName string, file
 	return response.MessageID, nil
 }
 
-func (t *TelegramClient) DownloadFile(fileID string) (*DownloadFileInfo, error) {
+func (t *TelegramClient) DownloadFile(ctx context.Context, fileID string) (*DownloadFileInfo, error) {
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+
 	file, err := t.api.GetFile(tgbotapi.FileConfig{FileID: fileID})
 
 	if err != nil {
@@ -155,7 +192,11 @@ func (t *TelegramClient) AnswerCallback(callbackID, messageText string) error {
 	return err
 }
 
-func (t *TelegramClient) GetInviteLink(secret string) (string, error) {
+func (t *TelegramClient) GetInviteLink(ctx context.Context, secret string) (string, error) {
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return "", err
+	}
+
 	me, err := t.api.GetMe()
 
 	if err != nil {
@@ -165,7 +206,11 @@ func (t *TelegramClient) GetInviteLink(secret string) (string, error) {
 	return fmt.Sprintf("https://telegram.me/%s?start=%s", me.UserName, secret), nil
 }
 
-func (t *TelegramClient) GetBotCommands(fromChatID int64) ([]tgbotapi.BotCommand, error) {
+func (t *TelegramClient) GetBotCommands(ctx context.Context, fromChatID int64) ([]tgbotapi.BotCommand, error) {
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+
 	commands, err := t.api.GetMyCommandsWithConfig(tgbotapi.NewGetMyCommandsWithScope(tgbotapi.NewBotCommandScopeChat(fromChatID)))
 
 	if err != nil {
@@ -175,7 +220,11 @@ func (t *TelegramClient) GetBotCommands(fromChatID int64) ([]tgbotapi.BotCommand
 	return commands, nil
 }
 
-func (t *TelegramClient) SetBotCommands(toChatID int64, commands []tgbotapi.BotCommand) error {
+func (t *TelegramClient) SetBotCommands(ctx context.Context, toChatID int64, commands []tgbotapi.BotCommand) error {
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return err
+	}
+
 	cfg := tgbotapi.NewSetMyCommandsWithScope(tgbotapi.NewBotCommandScopeChat(toChatID), commands...)
 
 	_, err := t.api.Request(cfg)
@@ -183,7 +232,11 @@ func (t *TelegramClient) SetBotCommands(toChatID int64, commands []tgbotapi.BotC
 	return err
 }
 
-func (t *TelegramClient) KickUserFromChat(fromChatID, userID int64, withBan bool) error {
+func (t *TelegramClient) KickUserFromChat(ctx context.Context, fromChatID, userID int64, withBan bool) error {
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return err
+	}
+
 	_, err := t.api.Request(tgbotapi.KickChatMemberConfig{
 		ChatMemberConfig: tgbotapi.ChatMemberConfig{
 			ChatID: fromChatID,
@@ -207,7 +260,11 @@ func (t *TelegramClient) KickUserFromChat(fromChatID, userID int64, withBan bool
 	return err
 }
 
-func (t *TelegramClient) GetContactInfo(userID int64) (*tgbotapi.Chat, error) {
+func (t *TelegramClient) GetContactInfo(ctx context.Context, userID int64) (*tgbotapi.Chat, error) {
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+
 	contact, err := t.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: userID}})
 
 	if err != nil {
@@ -221,7 +278,7 @@ func (t *TelegramClient) GetUpdates() tgbotapi.UpdatesChannel {
 	return t.api.GetUpdatesChan(tgbotapi.UpdateConfig{
 		Offset:         0,
 		Limit:          10,
-		Timeout:        10,
+		Timeout:        30,
 		AllowedUpdates: t.allowedUpdates,
 	})
 }
