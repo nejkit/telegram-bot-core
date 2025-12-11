@@ -483,8 +483,11 @@ func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx con
 	})
 
 	log.Debug("check is event contains callback data")
+	log.Debug("callback entry: " + update.CallbackData())
 
 	callback, _ := UnwrapCallbackData[Callback](update.CallbackData())
+
+	log.Debug("parsed callback: " + callback)
 
 	callbackHandler, ok := t.callbackHandler[callback]
 
