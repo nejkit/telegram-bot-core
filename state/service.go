@@ -70,10 +70,10 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 		processor:      NewMessageProcessor(),
 	}
 
-	handler.callbackHandler["set_previous_keyboard"] = HandlerInfo{
+	handler.callbackHandler["set-previous-keyboard"] = HandlerInfo{
 		Handler: handler.handleSetPreviousKeyboardPage,
 	}
-	handler.callbackHandler["set_next_keyboard"] = HandlerInfo{
+	handler.callbackHandler["set-next-keyboard"] = HandlerInfo{
 		Handler: handler.handleSetNextKeyboardPage,
 	}
 

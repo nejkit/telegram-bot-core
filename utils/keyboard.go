@@ -73,7 +73,7 @@ func buildInlineKeyboard(
 
 			if pageNumber != 0 {
 				row = append(row, tgbotapi.NewInlineKeyboardButtonData("Назад", state.WrapCallbackData(
-					"set_previous_keyboard",
+					"set-previous-keyboard",
 					"1",
 				),
 				),
@@ -82,7 +82,7 @@ func buildInlineKeyboard(
 
 			if pageNumber != pagesAmount {
 				row = append(row, tgbotapi.NewInlineKeyboardButtonData("Вперед", state.WrapCallbackData(
-					"set_next_keyboard",
+					"set-next-keyboard",
 					"1",
 				),
 				),
