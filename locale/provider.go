@@ -57,14 +57,17 @@ func (l *LocalizationProvider) GetWithCulture(culture, key string, args ...any) 
 	contentLocalizations, ok := l.locales.LocalizedContent[key]
 
 	if !ok {
+		logrus.Debug("not found content localization by provided key")
 		return key
 	}
 
 	content, ok := contentLocalizations[culture]
 
 	if !ok {
+		logrus.Debug("not found content localization by provided language")
 		content, ok = contentLocalizations[l.locales.DefaultCulture]
 
+		logrus.Debug("not found content localization by default language")
 		if !ok {
 			return key
 		}
