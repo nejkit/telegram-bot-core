@@ -5,6 +5,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	"sync"
+	"time"
 )
 
 type UserLimiter struct {
@@ -28,6 +29,30 @@ func NewUserLimiter(rateLimit rate.Limit, burst int) *UserLimiter {
 		rate:      rateLimit,
 		burst:     burst,
 		isEnabled: true,
+	}
+}
+
+func (u *UserLimiter) Run(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute * 30)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-ticker.C:
+			u.cleanup()
+		}
+	}
+}
+
+func (u *UserLimiter) cleanup() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	for chatID, limit := range u.limits {
+		if limit.Tokens() == float64(u.rate) {
+			delete(u.limits, chatID)
+		}
 	}
 }
 

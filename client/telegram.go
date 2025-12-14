@@ -56,12 +56,18 @@ func NewTelegramClient(cfg *config.TelegramConfig) *TelegramClient {
 		logrus.WithError(err).Fatal("Error creating telegram client")
 	}
 
+	chatLimiter := limiter.NewUserLimiter(rate.Every(time.Second), 2)
+
 	return &TelegramClient{
 		api:            botApi,
 		allowedUpdates: cfg.AllowedUpdates,
 		globalLimiter:  rate.NewLimiter(25, 25),
-		chatLimiter:    limiter.NewUserLimiter(rate.Every(time.Second), 2),
+		chatLimiter:    chatLimiter,
 	}
+}
+
+func (t *TelegramClient) RunChatRatesCleanup(ctx context.Context) {
+	go t.chatLimiter.Run(ctx)
 }
 
 func (t *TelegramClient) SendMessage(ctx context.Context, recipientChatID int64, messageText string, options ...MessageOptions) (int, error) {

@@ -243,6 +243,8 @@ func (t *TelegramStateService[Action, Command, Callback]) RegisterMiddlewareHand
 func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Context, updatesChan tgbotapi.UpdatesChannel) {
 	logrus.Info("start telegram updates handler service")
 	go t.startConsumeQueueChan(ctx)
+	t.telegramClient.RunChatRatesCleanup(ctx)
+	go t.limiter.Run(ctx)
 
 	for {
 		select {
