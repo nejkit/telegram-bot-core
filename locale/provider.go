@@ -32,8 +32,6 @@ func NewLocalizationProvider(filePath string) *LocalizationProvider {
 		panic(err)
 	}
 
-	logrus.WithField("content", string(data)).Infoln("loaded localization file")
-
 	var locales LocalizationFileInfo
 
 	err = json.Unmarshal(data, &locales)
@@ -41,6 +39,8 @@ func NewLocalizationProvider(filePath string) *LocalizationProvider {
 	if err != nil {
 		panic(err)
 	}
+
+	logrus.WithField("localeKeysAmount", len(locales.LocalizedContent)).Infoln("loaded localization file")
 
 	return &LocalizationProvider{
 		locales: &locales,
