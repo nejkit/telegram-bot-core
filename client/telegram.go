@@ -60,7 +60,7 @@ func NewTelegramClient(cfg *config.TelegramConfig) *TelegramClient {
 		api:            botApi,
 		allowedUpdates: cfg.AllowedUpdates,
 		globalLimiter:  rate.NewLimiter(25, 25),
-		chatLimiter:    limiter.NewUserLimiter(rate.Every(time.Second), 1),
+		chatLimiter:    limiter.NewUserLimiter(rate.Every(time.Second), 2),
 	}
 }
 
