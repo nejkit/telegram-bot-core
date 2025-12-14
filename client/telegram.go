@@ -5,7 +5,7 @@ import (
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/nejkit/telegram-bot-core/config"
-	"github.com/nejkit/telegram-bot-core/state"
+	"github.com/nejkit/telegram-bot-core/limiter"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	"io"
@@ -18,7 +18,7 @@ type TelegramClient struct {
 	api            *tgbotapi.BotAPI
 	allowedUpdates []string
 
-	chatLimiter   *state.UserLimiter
+	chatLimiter   *limiter.UserLimiter
 	globalLimiter *rate.Limiter
 }
 
@@ -60,7 +60,7 @@ func NewTelegramClient(cfg *config.TelegramConfig) *TelegramClient {
 		api:            botApi,
 		allowedUpdates: cfg.AllowedUpdates,
 		globalLimiter:  rate.NewLimiter(25, 25),
-		chatLimiter:    state.NewUserLimiter(rate.Every(time.Second), 1),
+		chatLimiter:    limiter.NewUserLimiter(rate.Every(time.Second), 1),
 	}
 }
 

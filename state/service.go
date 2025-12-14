@@ -5,6 +5,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/nejkit/telegram-bot-core/client"
 	"github.com/nejkit/telegram-bot-core/config"
+	"github.com/nejkit/telegram-bot-core/limiter"
 	"github.com/nejkit/telegram-bot-core/storage"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
@@ -44,7 +45,7 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 	actionStorage  *storage.UserActionStorage[Action]
 	messageStorage *storage.UserMessageStorage
 	workersCount   int
-	limiter        *UserLimiter
+	limiter        *limiter.UserLimiter
 	middlewareFunc MiddlewareFunc
 	processor      *MessageProcessor
 }
@@ -66,7 +67,7 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 		actionStorage:  actionStorage,
 		messageStorage: messageStorage,
 		workersCount:   cfg.WorkersCount,
-		limiter:        NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 1),
+		limiter:        limiter.NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 1),
 		processor:      NewMessageProcessor(),
 	}
 
@@ -113,7 +114,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeybo
 
 			newKeyboard := keyboardInfo.Keyboards[keyboardInfo.CurrentPosition]
 
-			err = t.telegramClient.EditMessage(userID, messageInfo.MessageID, client.WithEditInlineKeyboard(newKeyboard))
+			err = t.telegramClient.EditMessage(ctx, userID, messageInfo.MessageID, client.WithEditInlineKeyboard(newKeyboard))
 
 			if err != nil {
 				logrus.WithError(err).Error("Error editing keyboard")
@@ -167,7 +168,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardP
 
 			newKeyboard := keyboardInfo.Keyboards[keyboardInfo.CurrentPosition]
 
-			err = t.telegramClient.EditMessage(userID, messageInfo.MessageID, client.WithEditInlineKeyboard(newKeyboard))
+			err = t.telegramClient.EditMessage(ctx, userID, messageInfo.MessageID, client.WithEditInlineKeyboard(newKeyboard))
 
 			if err != nil {
 				logrus.WithError(err).Error("Error editing keyboard")
