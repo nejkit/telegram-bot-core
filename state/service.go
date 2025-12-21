@@ -634,16 +634,17 @@ func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx 
 		if err := validator(update); err != nil {
 			log.WithError(err).Error("failed validate update")
 			userLang := getLangFromContext(ctx)
-			messageID, err := t.telegramClient.SendMessage(ctx, chatID, t.locales.GetWithCulture(userLang, err.Error()))
+			messageID, inErr := t.telegramClient.SendMessage(ctx, chatID, t.locales.GetWithCulture(userLang, err.Error()))
 
-			if err != nil {
+			if inErr != nil {
 				log.WithError(err).Error("failed send message to telegram")
 				return err
 			}
 
-			if err = t.messageStorage.SaveUserMessage(ctx, chatID, messageID, false); err != nil {
-				log.WithError(err).Error("failed save message to storage")
+			if inErr = t.messageStorage.SaveUserMessage(ctx, chatID, messageID, false); err != nil {
+				log.WithError(inErr).Error("failed save message to storage")
 			}
+
 			return err
 		}
 	}
