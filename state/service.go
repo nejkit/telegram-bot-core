@@ -571,8 +571,14 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 	cmdHandler, ok := t.commandHandler[Command(update.Message.Command())]
 
 	if ok {
-		log.WithField("command", update.Message.Command()).
-			Debug("event is bot command, call handler")
+		log.WithField("command", update.Message.Command()).Debug("try process validations before call handler")
+
+		if err := t.processValidation(ctx, chatID, update, cmdHandler.MessageValidators, log); err != nil {
+			return
+		}
+
+		log.WithField("command", update.Message.Command()).Debug("validations processed, call handler")
+
 		err := cmdHandler.Handler(ctx, update)
 
 		if err != nil {
@@ -611,22 +617,8 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 
 	log.WithField("action", action).Debug("try process validations before call handler")
 
-	for _, validator := range actionHandler.MessageValidators {
-		if err := validator(update); err != nil {
-			log.WithError(err).Error("failed validate update")
-			userLang := getLangFromContext(ctx)
-			messageID, err := t.telegramClient.SendMessage(ctx, chatID, t.locales.GetWithCulture(userLang, err.Error()))
-
-			if err != nil {
-				log.WithError(err).Error("failed send message to telegram")
-				return
-			}
-
-			if err = t.messageStorage.SaveUserMessage(ctx, chatID, messageID, false); err != nil {
-				log.WithError(err).Error("failed save message to storage")
-			}
-			return
-		}
+	if err = t.processValidation(ctx, chatID, update, actionHandler.MessageValidators, log); err != nil {
+		return
 	}
 
 	log.WithField("action", action).Debug("validations processed, call handler")
@@ -636,6 +628,28 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 	if err != nil {
 		log.WithError(err).Error("failed handle event")
 	}
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx context.Context, chatID int64, update *tgbotapi.Update, validators []ValidatorFunc, log *logrus.Entry) error {
+	for _, validator := range validators {
+		if err := validator(update); err != nil {
+			log.WithError(err).Error("failed validate update")
+			userLang := getLangFromContext(ctx)
+			messageID, err := t.telegramClient.SendMessage(ctx, chatID, t.locales.GetWithCulture(userLang, err.Error()))
+
+			if err != nil {
+				log.WithError(err).Error("failed send message to telegram")
+				return err
+			}
+
+			if err = t.messageStorage.SaveUserMessage(ctx, chatID, messageID, false); err != nil {
+				log.WithError(err).Error("failed save message to storage")
+			}
+			return err
+		}
+	}
+
+	return nil
 }
 
 func getLangFromContext(ctx context.Context) string {
