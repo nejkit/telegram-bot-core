@@ -599,7 +599,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 		return
 	}
 
-	isCancel := update.Message.IsCommand() && update.Message.Command() != "cancel"
+	isCancel := update.Message.IsCommand() && update.Message.Command() == "cancel"
 
 	if isCancel {
 		log.WithField("action", action).
