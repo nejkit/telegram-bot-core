@@ -8,7 +8,6 @@ import (
 	"github.com/nejkit/telegram-bot-core/limiter"
 	"github.com/nejkit/telegram-bot-core/locale"
 	"github.com/nejkit/telegram-bot-core/storage"
-	"github.com/nejkit/telegram-bot-core/utils"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	"time"
@@ -652,8 +651,10 @@ func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx 
 	return nil
 }
 
+type LangCtxKey struct{}
+
 func getLangFromContext(ctx context.Context) string {
-	lang := ctx.Value(utils.LangCtxKey{})
+	lang := ctx.Value(LangCtxKey{})
 
 	if lang == nil {
 		return ""
