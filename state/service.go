@@ -6,7 +6,9 @@ import (
 	"github.com/nejkit/telegram-bot-core/client"
 	"github.com/nejkit/telegram-bot-core/config"
 	"github.com/nejkit/telegram-bot-core/limiter"
+	"github.com/nejkit/telegram-bot-core/locale"
 	"github.com/nejkit/telegram-bot-core/storage"
+	"github.com/nejkit/telegram-bot-core/utils"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	"time"
@@ -37,10 +39,10 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 	actionHandler   map[Action]HandlerInfo
 	callbackHandler map[Callback]HandlerInfo
 
-	chatMemberHandler   HandlerFunc
-	myChatMemberHandler HandlerFunc
-
+	chatMemberHandler     HandlerFunc
+	myChatMemberHandler   HandlerFunc
 	limiterMessageHandler HandlerFunc
+	chatMigrationHandler  HandlerFunc
 
 	actionStorage  *storage.UserActionStorage[Action]
 	messageStorage *storage.UserMessageStorage
@@ -48,6 +50,7 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 	limiter        *limiter.UserLimiter
 	middlewareFunc MiddlewareFunc
 	processor      *MessageProcessor
+	locales        *locale.LocalizationProvider
 }
 
 func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Callback CallbackPrefix](
@@ -55,6 +58,7 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 	actionStorage *storage.UserActionStorage[Action],
 	messageStorage *storage.UserMessageStorage,
 	client *client.TelegramClient,
+	locales *locale.LocalizationProvider,
 ) *TelegramStateService[Action, Command, Callback] {
 	handler := &TelegramStateService[Action, Command, Callback]{
 		chatRequestChannels: make(map[int64]chan tgbotapi.Update),
@@ -69,6 +73,7 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 		workersCount:   cfg.WorkersCount,
 		limiter:        limiter.NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 1),
 		processor:      NewMessageProcessor(),
+		locales:        locales,
 	}
 
 	handler.callbackHandler["set-previous-keyboard"] = HandlerInfo{
@@ -240,7 +245,14 @@ func (t *TelegramStateService[Action, Command, Callback]) RegisterMiddlewareHand
 	return t
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Context, updatesChan tgbotapi.UpdatesChannel) {
+func (t *TelegramStateService[Action, Command, Callback]) RegisterMigrationHandler(handler HandlerFunc) *TelegramStateService[Action, Command, Callback] {
+	t.chatMigrationHandler = handler
+
+	return t
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Context) {
+	updatesChan := t.telegramClient.GetUpdates()
 	logrus.Info("start telegram updates handler service")
 	go t.startConsumeQueueChan(ctx)
 	t.telegramClient.RunChatRatesCleanup(ctx)
@@ -438,6 +450,34 @@ func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx conte
 		"updateID": update.UpdateID,
 	})
 
+	if update.Message != nil && update.Message.MigrateToChatID != 0 {
+		if t.chatMigrationHandler == nil {
+			return
+		}
+
+		log.Debug("handle chat migration event")
+		if err := t.chatMigrationHandler(ctx, update); err != nil {
+			log.WithError(err).Error("failed execute chat migration handler")
+		}
+		return
+	}
+
+	if update.MyChatMember != nil && t.myChatMemberHandler != nil {
+		log.Debug("handle my chat member event")
+		if err := t.myChatMemberHandler(ctx, update); err != nil {
+			log.WithError(err).Error("failed handle my chat member event")
+		}
+		return
+	}
+
+	if update.ChatMember != nil && t.chatMemberHandler != nil {
+		log.Debug("handle chat member event")
+		if err := t.chatMemberHandler(ctx, update); err != nil {
+			log.WithError(err).Error("failed handle chat member event")
+		}
+		return
+	}
+
 	if t.middlewareFunc != nil {
 		log.Debug("try call middleware")
 		var isSuccess bool
@@ -452,28 +492,16 @@ func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx conte
 		log.Debug("middleware called successfully")
 	}
 
-	if update.MyChatMember != nil && t.myChatMemberHandler != nil {
-		log.Debug("handle my chat member event")
-		if err := t.myChatMemberHandler(ctx, update); err != nil {
-			log.WithError(err).Error("failed handle my chat member event")
-		}
-	}
-
-	if update.ChatMember != nil && t.chatMemberHandler != nil {
-		log.Debug("handle chat member event")
-		if err := t.chatMemberHandler(ctx, update); err != nil {
-			log.WithError(err).Error("failed handle chat member event")
-		}
-	}
-
 	if update.Message != nil {
 		log.Debug("handle message event")
 		t.handleMessage(ctx, update)
+		return
 	}
 
 	if update.CallbackQuery != nil {
 		log.Debug("handle callback event")
 		t.handleCallback(ctx, update)
+		return
 	}
 }
 
@@ -531,6 +559,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx con
 
 func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx context.Context, update *tgbotapi.Update) {
 	userID := update.SentFrom().ID
+	chatID := update.FromChat().ID
 	log := logrus.WithFields(logrus.Fields{
 		"updateID": update.UpdateID,
 		"userID":   userID,
@@ -585,6 +614,17 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 	for _, validator := range actionHandler.MessageValidators {
 		if err := validator(update); err != nil {
 			log.WithError(err).Error("failed validate update")
+			userLang := getLangFromContext(ctx)
+			messageID, err := t.telegramClient.SendMessage(ctx, chatID, t.locales.GetWithCulture(userLang, err.Error()))
+
+			if err != nil {
+				log.WithError(err).Error("failed send message to telegram")
+				return
+			}
+
+			if err = t.messageStorage.SaveUserMessage(ctx, chatID, messageID, false); err != nil {
+				log.WithError(err).Error("failed save message to storage")
+			}
 			return
 		}
 	}
@@ -596,4 +636,14 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 	if err != nil {
 		log.WithError(err).Error("failed handle event")
 	}
+}
+
+func getLangFromContext(ctx context.Context) string {
+	lang := ctx.Value(utils.LangCtxKey{})
+
+	if lang == nil {
+		return ""
+	}
+
+	return lang.(string)
 }
