@@ -572,7 +572,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 	if ok {
 		log.WithField("command", update.Message.Command()).Debug("try process validations before call handler")
 
-		if err := t.processValidation(ctx, chatID, update, cmdHandler.MessageValidators, log); err != nil {
+		if err := t.processValidation(ctx, chatID, update, cmdHandler.MessageValidators, log, false); err != nil {
 			return
 		}
 
@@ -616,7 +616,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 
 	log.WithField("action", action).Debug("try process validations before call handler")
 
-	if err = t.processValidation(ctx, chatID, update, actionHandler.MessageValidators, log); err != nil {
+	if err = t.processValidation(ctx, chatID, update, actionHandler.MessageValidators, log, true); err != nil {
 		return
 	}
 
@@ -629,7 +629,17 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 	}
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx context.Context, chatID int64, update *tgbotapi.Update, validators []ValidatorFunc, log *logrus.Entry) error {
+func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx context.Context, chatID int64, update *tgbotapi.Update, validators []ValidatorFunc, log *logrus.Entry, withDeleteMessage bool) error {
+	updateMessageID := 0
+
+	if update.Message != nil {
+		updateMessageID = update.Message.MessageID
+	}
+
+	if update.CallbackQuery != nil {
+		updateMessageID = update.CallbackQuery.Message.MessageID
+	}
+
 	for _, validator := range validators {
 		if err := validator(update); err != nil {
 			log.WithError(err).Error("failed validate update")
@@ -641,7 +651,15 @@ func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx 
 				return err
 			}
 
-			if inErr = t.messageStorage.SaveUserMessage(ctx, chatID, messageID, false); err != nil {
+			if !withDeleteMessage {
+				return err
+			}
+
+			if inErr = t.messageStorage.SaveUserMessage(ctx, chatID, messageID, false); inErr != nil {
+				log.WithError(inErr).Error("failed save message to storage")
+			}
+
+			if inErr = t.messageStorage.SaveUserMessage(ctx, chatID, updateMessageID, false); inErr != nil {
 				log.WithError(inErr).Error("failed save message to storage")
 			}
 
