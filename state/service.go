@@ -10,6 +10,7 @@ import (
 	"github.com/nejkit/telegram-bot-core/storage"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
+	"slices"
 	"time"
 )
 
@@ -43,13 +44,14 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 	limiterMessageHandler HandlerFunc
 	chatMigrationHandler  HandlerFunc
 
-	actionStorage  *storage.UserActionStorage[Action]
-	messageStorage *storage.UserMessageStorage
-	workersCount   int
-	limiter        *limiter.UserLimiter
-	middlewareFunc MiddlewareFunc
-	processor      *MessageProcessor
-	locales        *locale.LocalizationProvider
+	actionStorage      *storage.UserActionStorage[Action]
+	messageStorage     *storage.UserMessageStorage
+	workersCount       int
+	limiter            *limiter.UserLimiter
+	middlewareFunc     MiddlewareFunc
+	processor          *MessageProcessor
+	locales            *locale.LocalizationProvider
+	notFlowableActions []Action
 }
 
 func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Callback CallbackPrefix](
@@ -67,12 +69,13 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 		callbackHandler:     make(map[Callback]HandlerInfo),
 		telegramClient:      client,
 
-		actionStorage:  actionStorage,
-		messageStorage: messageStorage,
-		workersCount:   cfg.WorkersCount,
-		limiter:        limiter.NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 1),
-		processor:      NewMessageProcessor(),
-		locales:        locales,
+		actionStorage:      actionStorage,
+		messageStorage:     messageStorage,
+		workersCount:       cfg.WorkersCount,
+		limiter:            limiter.NewUserLimiter(rate.Limit(cfg.MessagePerSecond), 1),
+		processor:          NewMessageProcessor(),
+		locales:            locales,
+		notFlowableActions: make([]Action, 0),
 	}
 
 	handler.callbackHandler["set-previous-keyboard"] = HandlerInfo{
@@ -216,6 +219,12 @@ func (t *TelegramStateService[Action, Command, Callback]) RegisterCallbackHandle
 		Handler:           handler,
 		MessageValidators: validators,
 	}
+
+	return t
+}
+
+func (t *TelegramStateService[Action, Command, Callback]) AddNotFlowableAction(action Action) *TelegramStateService[Action, Command, Callback] {
+	t.notFlowableActions = append(t.notFlowableActions, action)
 
 	return t
 }
@@ -572,7 +581,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 	if ok {
 		log.WithField("command", update.Message.Command()).Debug("try process validations before call handler")
 
-		if err := t.processValidation(ctx, chatID, update, cmdHandler.MessageValidators, log, false); err != nil {
+		if err := t.processValidation(ctx, chatID, update, cmdHandler.MessageValidators, log, 0); err != nil {
 			return
 		}
 
@@ -616,7 +625,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 
 	log.WithField("action", action).Debug("try process validations before call handler")
 
-	if err = t.processValidation(ctx, chatID, update, actionHandler.MessageValidators, log, true); err != nil {
+	if err = t.processValidation(ctx, chatID, update, actionHandler.MessageValidators, log, action); err != nil {
 		return
 	}
 
@@ -629,7 +638,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 	}
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx context.Context, chatID int64, update *tgbotapi.Update, validators []ValidatorFunc, log *logrus.Entry, withDeleteMessage bool) error {
+func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx context.Context, chatID int64, update *tgbotapi.Update, validators []ValidatorFunc, log *logrus.Entry, action Action) error {
 	updateMessageID := 0
 
 	if update.Message != nil {
@@ -651,7 +660,7 @@ func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx 
 				return err
 			}
 
-			if !withDeleteMessage {
+			if slices.Contains(t.notFlowableActions, action) {
 				return err
 			}
 
