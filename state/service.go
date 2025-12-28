@@ -44,8 +44,8 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 	limiterMessageHandler HandlerFunc
 	chatMigrationHandler  HandlerFunc
 
-	actionStorage      *storage.UserActionStorage[Action]
-	messageStorage     *storage.UserMessageStorage
+	actionStorage      storage.UserActionStorage
+	messageStorage     storage.UserMessageStorage
 	workersCount       int
 	limiter            *limiter.UserLimiter
 	middlewareFunc     MiddlewareFunc
@@ -56,8 +56,8 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 
 func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Callback CallbackPrefix](
 	cfg config.TelegramConfig,
-	actionStorage *storage.UserActionStorage[Action],
-	messageStorage *storage.UserMessageStorage,
+	actionStorage storage.UserActionStorage,
+	messageStorage storage.UserMessageStorage,
 	client *client.TelegramClient,
 	locales *locale.LocalizationProvider,
 ) *TelegramStateService[Action, Command, Callback] {
@@ -287,8 +287,8 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 				fromUser = &tgbotapi.User{}
 			}
 
-			chatID := update.FromChat().ID
-			userID := update.SentFrom().ID
+			chatID := fromChat.ID
+			userID := fromUser.ID
 			withRateCheck := true
 
 			if update.ChatMember != nil {
@@ -548,7 +548,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx con
 		return
 	}
 
-	actionHandler, ok := t.actionHandler[action]
+	actionHandler, ok := t.actionHandler[Action(action)]
 
 	if !ok {
 		log.Error("action handler not found")
@@ -601,7 +601,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 		return
 	}
 
-	actionHandler, ok := t.actionHandler[action]
+	actionHandler, ok := t.actionHandler[Action(action)]
 
 	if !ok {
 		log.Error("action handler not found")
@@ -625,7 +625,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 
 	log.WithField("action", action).Debug("try process validations before call handler")
 
-	if err = t.processValidation(ctx, chatID, update, actionHandler.MessageValidators, log, action); err != nil {
+	if err = t.processValidation(ctx, chatID, update, actionHandler.MessageValidators, log, Action(action)); err != nil {
 		return
 	}
 

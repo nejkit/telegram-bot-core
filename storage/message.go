@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/dgraph-io/ristretto"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/nejkit/telegram-bot-core/domain"
 	"github.com/redis/go-redis/v9"
@@ -21,27 +22,27 @@ type MessageInfo struct {
 	InlineKeyboard bool  `json:"inline_keyboard,omitempty"`
 }
 
-func (s *UserMessageStorage) getMessagesKey(identifier string) string {
+func (s *RedisUserMessageStorage) getMessagesKey(identifier string) string {
 	return fmt.Sprintf("%s:user:message:%s", s.botInstancePrefix, identifier)
 }
 
-func (s *UserMessageStorage) getKeyboardsKey(userID int64, messageID int) string {
+func (s *RedisUserMessageStorage) getKeyboardsKey(userID int64, messageID int) string {
 	return fmt.Sprintf("%s:user:keyboard:%d:%d", s.botInstancePrefix, userID, messageID)
 }
 
-type UserMessageStorage struct {
+type RedisUserMessageStorage struct {
 	botInstancePrefix string
 	client            *redis.Client
 }
 
-func NewUserMessageStorage(
+func NewRedisUserMessageStorage(
 	botInstancePrefix string,
 	client *redis.Client,
-) *UserMessageStorage {
-	return &UserMessageStorage{botInstancePrefix: botInstancePrefix, client: client}
+) *RedisUserMessageStorage {
+	return &RedisUserMessageStorage{botInstancePrefix: botInstancePrefix, client: client}
 }
 
-func (s *UserMessageStorage) SaveCallbackMessage(ctx context.Context, callbackID string, chatID int64, messageID int) error {
+func (s *RedisUserMessageStorage) SaveCallbackMessage(ctx context.Context, callbackID string, chatID int64, messageID int) error {
 	payload := &MessageInfo{
 		MessageID: messageID,
 		ChatID:    chatID,
@@ -56,7 +57,7 @@ func (s *UserMessageStorage) SaveCallbackMessage(ctx context.Context, callbackID
 	return s.client.Set(ctx, s.getMessagesKey(callbackID), payloadBytes, 0).Err()
 }
 
-func (s *UserMessageStorage) GetCallbackMessage(ctx context.Context, callbackID string) (*MessageInfo, error) {
+func (s *RedisUserMessageStorage) GetCallbackMessage(ctx context.Context, callbackID string) (*MessageInfo, error) {
 	rawData, err := s.client.Get(ctx, s.getMessagesKey(callbackID)).Bytes()
 
 	if errors.Is(err, redis.Nil) {
@@ -78,11 +79,11 @@ func (s *UserMessageStorage) GetCallbackMessage(ctx context.Context, callbackID 
 	return &message, nil
 }
 
-func (s *UserMessageStorage) DeleteCallbackMessage(ctx context.Context, callbackID string) error {
+func (s *RedisUserMessageStorage) DeleteCallbackMessage(ctx context.Context, callbackID string) error {
 	return s.client.Del(ctx, s.getMessagesKey(callbackID)).Err()
 }
 
-func (s *UserMessageStorage) SaveUserMessage(ctx context.Context, chatID int64, messageID int, withKeyboard bool) error {
+func (s *RedisUserMessageStorage) SaveUserMessage(ctx context.Context, chatID int64, messageID int, withKeyboard bool) error {
 	payload := &MessageInfo{
 		MessageID:      messageID,
 		ChatID:         chatID,
@@ -98,7 +99,7 @@ func (s *UserMessageStorage) SaveUserMessage(ctx context.Context, chatID int64, 
 	return s.client.SAdd(ctx, s.getMessagesKey(fmt.Sprint(chatID)), payloadBytes).Err()
 }
 
-func (s *UserMessageStorage) GetUserMessages(ctx context.Context, chatID int64) ([]MessageInfo, error) {
+func (s *RedisUserMessageStorage) GetUserMessages(ctx context.Context, chatID int64) ([]MessageInfo, error) {
 	rawMessages, err := s.client.SMembers(ctx, s.getMessagesKey(fmt.Sprint(chatID))).Result()
 
 	if err != nil {
@@ -120,11 +121,11 @@ func (s *UserMessageStorage) GetUserMessages(ctx context.Context, chatID int64) 
 	return messages, nil
 }
 
-func (s *UserMessageStorage) DeleteUserMessage(ctx context.Context, chatID int64) error {
+func (s *RedisUserMessageStorage) DeleteUserMessage(ctx context.Context, chatID int64) error {
 	return s.client.Del(ctx, s.getMessagesKey(fmt.Sprint(chatID))).Err()
 }
 
-func (s *UserMessageStorage) SaveKeyboardInfo(ctx context.Context, chatID int64, messageID int, keyboard *KeyboardInfo) error {
+func (s *RedisUserMessageStorage) SaveKeyboardInfo(ctx context.Context, chatID int64, messageID int, keyboard *KeyboardInfo) error {
 	rawData, err := json.Marshal(keyboard)
 
 	if err != nil {
@@ -134,7 +135,7 @@ func (s *UserMessageStorage) SaveKeyboardInfo(ctx context.Context, chatID int64,
 	return s.client.Set(ctx, s.getKeyboardsKey(chatID, messageID), rawData, 0).Err()
 }
 
-func (s *UserMessageStorage) GetKeyboardInfo(ctx context.Context, chatID int64, messageID int) (*KeyboardInfo, error) {
+func (s *RedisUserMessageStorage) GetKeyboardInfo(ctx context.Context, chatID int64, messageID int) (*KeyboardInfo, error) {
 	rawData, err := s.client.Get(ctx, s.getKeyboardsKey(chatID, messageID)).Bytes()
 
 	if err != nil {
@@ -152,6 +153,98 @@ func (s *UserMessageStorage) GetKeyboardInfo(ctx context.Context, chatID int64, 
 	return &keyboard, nil
 }
 
-func (s *UserMessageStorage) DeleteKeyboardInfo(ctx context.Context, chatID int64, messageID int) error {
+func (s *RedisUserMessageStorage) DeleteKeyboardInfo(ctx context.Context, chatID int64, messageID int) error {
 	return s.client.Del(ctx, s.getKeyboardsKey(chatID, messageID)).Err()
+}
+
+type InMemoryUserMessageStorage struct {
+	client *ristretto.Cache
+}
+
+func NewInMemoryUserMessageStorage(client *ristretto.Cache) *InMemoryUserMessageStorage {
+	return &InMemoryUserMessageStorage{client: client}
+}
+
+func (i *InMemoryUserMessageStorage) getMessagesKey(identifier string) string {
+	return fmt.Sprintf("user:message:%s", identifier)
+}
+
+func (i *InMemoryUserMessageStorage) getKeyboardsKey(userID int64, messageID int) string {
+	return fmt.Sprintf("user:keyboard:%d:%d", userID, messageID)
+}
+
+func (i *InMemoryUserMessageStorage) SaveCallbackMessage(_ context.Context, callbackID string, chatID int64, messageID int) error {
+	if ok := i.client.Set(i.getMessagesKey(callbackID), &MessageInfo{
+		MessageID:      messageID,
+		ChatID:         chatID,
+		InlineKeyboard: false,
+	}, 0); !ok {
+		return errors.New("failed to save callback message")
+	}
+
+	return nil
+}
+
+func (i *InMemoryUserMessageStorage) GetCallbackMessage(_ context.Context, callbackID string) (*MessageInfo, error) {
+	data, ok := i.client.Get(i.getMessagesKey(callbackID))
+
+	if !ok {
+		return nil, domain.ErrorMessageNotFound
+	}
+
+	return data.(*MessageInfo), nil
+}
+
+func (i *InMemoryUserMessageStorage) DeleteCallbackMessage(_ context.Context, callbackID string) error {
+	i.client.Del(i.getMessagesKey(callbackID))
+	return nil
+}
+
+func (i *InMemoryUserMessageStorage) SaveUserMessage(_ context.Context, chatID int64, messageID int, withKeyboard bool) error {
+	if ok := i.client.Set(i.getMessagesKey(fmt.Sprint(chatID)), &MessageInfo{
+		MessageID:      messageID,
+		ChatID:         chatID,
+		InlineKeyboard: withKeyboard,
+	}, 0); !ok {
+		return errors.New("failed to save callback message")
+	}
+
+	return nil
+}
+
+func (i *InMemoryUserMessageStorage) GetUserMessages(_ context.Context, chatID int64) ([]MessageInfo, error) {
+	data, ok := i.client.Get(i.getMessagesKey(fmt.Sprint(chatID)))
+	if !ok {
+		return nil, domain.ErrorMessageNotFound
+	}
+
+	return data.([]MessageInfo), nil
+}
+
+func (i *InMemoryUserMessageStorage) DeleteUserMessage(_ context.Context, chatID int64) error {
+	i.client.Del(i.getMessagesKey(fmt.Sprint(chatID)))
+	return nil
+}
+
+func (i *InMemoryUserMessageStorage) SaveKeyboardInfo(_ context.Context, chatID int64, messageID int, keyboard *KeyboardInfo) error {
+	if ok := i.client.Set(i.getKeyboardsKey(chatID, messageID), keyboard, 0); !ok {
+		return errors.New("failed to save keyboard info")
+	}
+
+	return nil
+}
+
+func (i *InMemoryUserMessageStorage) GetKeyboardInfo(_ context.Context, chatID int64, messageID int) (*KeyboardInfo, error) {
+	data, ok := i.client.Get(i.getKeyboardsKey(chatID, messageID))
+
+	if !ok {
+		return nil, domain.ErrorMessageNotFound
+	}
+
+	return data.(*KeyboardInfo), nil
+}
+
+func (i *InMemoryUserMessageStorage) DeleteKeyboardInfo(_ context.Context, chatID int64, messageID int) error {
+	i.client.Del(i.getKeyboardsKey(chatID, messageID))
+	return nil
 }
