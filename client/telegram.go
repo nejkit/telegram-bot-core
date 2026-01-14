@@ -37,6 +37,12 @@ func WithSendReplyKeyboard(keyboard tgbotapi.ReplyKeyboardMarkup) MessageOptions
 	}
 }
 
+func WithRemoveReplyKeyboard() MessageOptions {
+	return func(msgCfg *tgbotapi.MessageConfig) {
+		msgCfg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(false)
+	}
+}
+
 func WithEditInlineKeyboard(keyboard tgbotapi.InlineKeyboardMarkup) EditMessageOptions {
 	return func(msgCfg *tgbotapi.EditMessageTextConfig) {
 		msgCfg.ReplyMarkup = &keyboard
