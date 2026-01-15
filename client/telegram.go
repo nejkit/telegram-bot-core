@@ -162,6 +162,24 @@ func (t *TelegramClient) UploadFile(ctx context.Context, recipientChatID int64, 
 	return response.MessageID, nil
 }
 
+func (t *TelegramClient) SendFileByID(ctx context.Context, recipientChatID int64, fileID string) (int, error) {
+	cfg := tgbotapi.NewDocument(recipientChatID, tgbotapi.FileID(fileID))
+
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return 0, err
+	}
+
+	t.chatLimiter.Wait(ctx, recipientChatID)
+
+	response, err := t.api.Send(cfg)
+
+	if err != nil {
+		return 0, err
+	}
+
+	return response.MessageID, nil
+}
+
 func (t *TelegramClient) DownloadFile(ctx context.Context, fileID string) (*DownloadFileInfo, error) {
 	if err := t.globalLimiter.Wait(ctx); err != nil {
 		return nil, err
