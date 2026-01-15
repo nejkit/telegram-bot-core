@@ -141,14 +141,14 @@ func (t *TelegramClient) DeleteMessage(ctx context.Context, recipientChatID int6
 	return err
 }
 
-func (t *TelegramClient) UploadFile(ctx context.Context, recipientChatID int64, fileName string, fileContent []byte) (int, error) {
+func (t *TelegramClient) UploadFile(ctx context.Context, recipientChatID int64, fileName string, fileContent []byte) (int, string, error) {
 	cfg := tgbotapi.NewDocument(recipientChatID, tgbotapi.FileBytes{
 		Name:  fileName,
 		Bytes: fileContent,
 	})
 
 	if err := t.globalLimiter.Wait(ctx); err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	t.chatLimiter.Wait(ctx, recipientChatID)
@@ -156,10 +156,10 @@ func (t *TelegramClient) UploadFile(ctx context.Context, recipientChatID int64, 
 	response, err := t.api.Send(cfg)
 
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
-	return response.MessageID, nil
+	return response.MessageID, response.Document.FileID, nil
 }
 
 func (t *TelegramClient) SendFileByID(ctx context.Context, recipientChatID int64, fileID string) (int, error) {
