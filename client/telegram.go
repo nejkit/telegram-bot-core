@@ -180,6 +180,24 @@ func (t *TelegramClient) SendFileByID(ctx context.Context, recipientChatID int64
 	return response.MessageID, nil
 }
 
+func (t *TelegramClient) CopyMessage(ctx context.Context, fromChatID, toChatID int64, messageID int) (int, error) {
+	cfg := tgbotapi.NewCopyMessage(toChatID, fromChatID, messageID)
+
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return 0, err
+	}
+
+	t.chatLimiter.Wait(ctx, toChatID)
+
+	response, err := t.api.Send(cfg)
+
+	if err != nil {
+		return 0, err
+	}
+
+	return response.MessageID, nil
+}
+
 func (t *TelegramClient) DownloadFile(ctx context.Context, fileID string) (*DownloadFileInfo, error) {
 	if err := t.globalLimiter.Wait(ctx); err != nil {
 		return nil, err
