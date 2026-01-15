@@ -57,7 +57,7 @@ func (l *LocalizationProvider) GetWithCulture(culture, key string, args ...any) 
 	contentLocalizations, ok := l.locales.LocalizedContent[key]
 
 	if !ok {
-		return key
+		return fmt.Sprintf("key: %s, args: %v", key, args)
 	}
 
 	content, ok := contentLocalizations[culture]
@@ -66,7 +66,7 @@ func (l *LocalizationProvider) GetWithCulture(culture, key string, args ...any) 
 		content, ok = contentLocalizations[l.locales.DefaultCulture]
 
 		if !ok {
-			return key
+			return fmt.Sprintf("key: %s, args: %v", key, args)
 		}
 	}
 
