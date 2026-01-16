@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/nejkit/telegram-bot-core/config"
@@ -10,6 +11,7 @@ import (
 	"golang.org/x/time/rate"
 	"io"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"time"
 )
@@ -76,6 +78,32 @@ func NewTelegramClient(cfg *config.TelegramConfig) *TelegramClient {
 		globalLimiter:  rate.NewLimiter(25, 25),
 		chatLimiter:    chatLimiter,
 	}
+}
+
+func (t *TelegramClient) ValidateWebAppInitData(initData string) (int64, error) {
+	valid, err := tgbotapi.ValidateWebAppData(t.api.Token, initData)
+
+	if err != nil {
+		return 0, err
+	}
+
+	if !valid {
+		return 0, fmt.Errorf("invalid telegram init data")
+	}
+
+	params, _ := url.ParseQuery(initData)
+
+	userJson := params.Get("user")
+
+	user := struct {
+		ID int64 `json:"id"`
+	}{}
+
+	if err := json.Unmarshal([]byte(userJson), &user); err != nil {
+		return 0, err
+	}
+
+	return user.ID, nil
 }
 
 func (t *TelegramClient) RunChatRatesCleanup(ctx context.Context) {
