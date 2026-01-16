@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/dgraph-io/ristretto v0.2.0
-	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
+	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.2-0.20221020003552-4126fa611266
 	github.com/redis/go-redis/v9 v9.17.0
 	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/time v0.14.0
