@@ -6,4 +6,5 @@ type TelegramConfig struct {
 	WorkersCount         int      `env:"WORKERS_COUNT" envDefault:"1"`
 	MessagePerSecond     int      `env:"MESSAGE_PER_SECOND" envDefault:"-1"`
 	LocalizationFilePath string   `env:"LOCALIZATION_FILE_PATH"`
+	TelegramApiUrl       string   `env:"TELEGRAM_API_URL" envDefault:"https://api.telegram.org/bot%s/%s"`
 }

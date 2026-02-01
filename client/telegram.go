@@ -64,7 +64,10 @@ type DownloadFileInfo struct {
 }
 
 func NewTelegramClient(cfg *config.TelegramConfig) *TelegramClient {
-	botApi, err := tgbotapi.NewBotAPI(cfg.Token)
+	botApi, err := tgbotapi.NewBotAPIWithAPIEndpoint(
+		cfg.Token,
+		cfg.TelegramApiUrl,
+	)
 
 	if err != nil {
 		logrus.WithError(err).Fatal("Error creating telegram client")
