@@ -4,16 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/nejkit/telegram-bot-core/config"
-	"github.com/nejkit/telegram-bot-core/limiter"
-	"github.com/sirupsen/logrus"
-	"golang.org/x/time/rate"
 	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/nejkit/telegram-bot-core/config"
+	"github.com/nejkit/telegram-bot-core/limiter"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 )
 
 type TelegramClient struct {
@@ -64,9 +65,21 @@ type DownloadFileInfo struct {
 }
 
 func NewTelegramClient(cfg *config.TelegramConfig) *TelegramClient {
-	botApi, err := tgbotapi.NewBotAPIWithAPIEndpoint(
+	transport := &RetryTransport{
+		Base:    http.DefaultTransport,
+		Retries: 3,
+		Wait:    500 * time.Millisecond,
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   10 * time.Second,
+	}
+
+	botApi, err := tgbotapi.NewBotAPIWithClient(
 		cfg.Token,
 		cfg.TelegramApiUrl,
+		client,
 	)
 
 	if err != nil {
