@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -142,7 +143,7 @@ func (t *TelegramClient) SendMessage(ctx context.Context, recipientChatID int64,
 	response, err := t.api.Send(cfg)
 
 	if err != nil {
-		return 0, err
+		return 0, t.handleError(err)
 	}
 
 	return response.MessageID, nil
@@ -168,7 +169,7 @@ func (t *TelegramClient) EditMessage(ctx context.Context, recipientChatID int64,
 
 	_, err := t.api.Send(cfg)
 
-	return err
+	return t.handleError(err)
 }
 
 func (t *TelegramClient) DeleteMessage(ctx context.Context, recipientChatID int64, messageID int) error {
@@ -182,7 +183,7 @@ func (t *TelegramClient) DeleteMessage(ctx context.Context, recipientChatID int6
 
 	_, err := t.api.Request(cfg)
 
-	return err
+	return t.handleError(err)
 }
 
 func (t *TelegramClient) UploadFile(ctx context.Context, recipientChatID int64, fileName string, fileContent []byte) (int, string, error) {
@@ -200,7 +201,7 @@ func (t *TelegramClient) UploadFile(ctx context.Context, recipientChatID int64, 
 	response, err := t.api.Send(cfg)
 
 	if err != nil {
-		return 0, "", err
+		return 0, "", t.handleError(err)
 	}
 
 	return response.MessageID, response.Document.FileID, nil
@@ -218,7 +219,7 @@ func (t *TelegramClient) SendFileByID(ctx context.Context, recipientChatID int64
 	response, err := t.api.Send(cfg)
 
 	if err != nil {
-		return 0, err
+		return 0, t.handleError(err)
 	}
 
 	return response.MessageID, nil
@@ -236,7 +237,7 @@ func (t *TelegramClient) CopyMessage(ctx context.Context, fromChatID, toChatID i
 	response, err := t.api.Send(cfg)
 
 	if err != nil {
-		return 0, err
+		return 0, t.handleError(err)
 	}
 
 	return response.MessageID, nil
@@ -250,7 +251,7 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, fileID string) (*Down
 	file, err := t.api.GetFile(tgbotapi.FileConfig{FileID: fileID})
 
 	if err != nil {
-		return nil, err
+		return nil, t.handleError(err)
 	}
 
 	httpResp, err := http.Get(file.Link(t.api.Token))
@@ -287,7 +288,7 @@ func (t *TelegramClient) AnswerCallback(callbackID, messageText string) error {
 
 	_, err := t.api.Request(cfg)
 
-	return err
+	return t.handleError(err)
 }
 
 func (t *TelegramClient) GetInviteLink(ctx context.Context, secret string) (string, error) {
@@ -298,7 +299,7 @@ func (t *TelegramClient) GetInviteLink(ctx context.Context, secret string) (stri
 	me, err := t.api.GetMe()
 
 	if err != nil {
-		return "", err
+		return "", t.handleError(err)
 	}
 
 	return fmt.Sprintf("https://telegram.me/%s?start=%s", me.UserName, secret), nil
@@ -312,7 +313,7 @@ func (t *TelegramClient) GetBotCommands(ctx context.Context, fromChatID int64) (
 	commands, err := t.api.GetMyCommandsWithConfig(tgbotapi.NewGetMyCommandsWithScope(tgbotapi.NewBotCommandScopeChat(fromChatID)))
 
 	if err != nil {
-		return nil, err
+		return nil, t.handleError(err)
 	}
 
 	return commands, nil
@@ -327,7 +328,7 @@ func (t *TelegramClient) SetBotCommands(ctx context.Context, toChatID int64, com
 
 	_, err := t.api.Request(cfg)
 
-	return err
+	return t.handleError(err)
 }
 
 func (t *TelegramClient) KickUserFromChat(ctx context.Context, fromChatID, userID int64, withBan bool) error {
@@ -344,7 +345,7 @@ func (t *TelegramClient) KickUserFromChat(ctx context.Context, fromChatID, userI
 	})
 
 	if err != nil || withBan {
-		return err
+		return t.handleError(err)
 	}
 
 	_, err = t.api.Request(tgbotapi.UnbanChatMemberConfig{
@@ -355,7 +356,7 @@ func (t *TelegramClient) KickUserFromChat(ctx context.Context, fromChatID, userI
 		OnlyIfBanned: true,
 	})
 
-	return err
+	return t.handleError(err)
 }
 
 func (t *TelegramClient) GetContactInfo(ctx context.Context, userID int64) (*tgbotapi.Chat, error) {
@@ -366,7 +367,7 @@ func (t *TelegramClient) GetContactInfo(ctx context.Context, userID int64) (*tgb
 	contact, err := t.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: userID}})
 
 	if err != nil {
-		return nil, err
+		return nil, t.handleError(err)
 	}
 
 	return &contact, nil
@@ -379,4 +380,26 @@ func (t *TelegramClient) GetUpdates() tgbotapi.UpdatesChannel {
 		Timeout:        30,
 		AllowedUpdates: t.allowedUpdates,
 	})
+}
+
+func (t *TelegramClient) handleError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var tgError tgbotapi.Error
+
+	if !errors.As(err, &tgError) {
+		return err
+	}
+
+	if tgError.Message == "Forbidden: bot was blocked by the user" {
+		return nil
+	}
+
+	if tgError.Message == "Forbidden: user is deactivated" {
+		return nil
+	}
+
+	return tgError
 }
