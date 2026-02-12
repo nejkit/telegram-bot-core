@@ -169,6 +169,26 @@ func (t *TelegramClient) EditMessage(ctx context.Context, recipientChatID int64,
 	return t.handleError(err)
 }
 
+func (t *TelegramClient) EditMessageKeyboard(ctx context.Context, recipientChatID int64, messageID int, keyboard *tgbotapi.InlineKeyboardMarkup) error {
+	cfg := &tgbotapi.EditMessageReplyMarkupConfig{
+		BaseEdit: tgbotapi.BaseEdit{
+			ChatID:      recipientChatID,
+			MessageID:   messageID,
+			ReplyMarkup: keyboard,
+		},
+	}
+
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return err
+	}
+
+	t.chatLimiter.Wait(ctx, recipientChatID)
+
+	_, err := t.api.Send(cfg)
+
+	return t.handleError(err)
+}
+
 func (t *TelegramClient) DeleteMessage(ctx context.Context, recipientChatID int64, messageID int) error {
 	cfg := tgbotapi.NewDeleteMessage(recipientChatID, messageID)
 
