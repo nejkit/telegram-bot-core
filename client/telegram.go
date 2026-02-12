@@ -69,13 +69,10 @@ func NewTelegramClient(cfg *config.TelegramConfig) *TelegramClient {
 	transport := &RetryTransport{
 		Base:    http.DefaultTransport,
 		Retries: 3,
-		Wait:    500 * time.Millisecond,
+		Wait:    time.Second,
 	}
 
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   10 * time.Second,
-	}
+	client := &http.Client{Transport: transport}
 
 	botApi, err := tgbotapi.NewBotAPIWithClient(
 		cfg.Token,
