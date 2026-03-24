@@ -322,6 +322,36 @@ func (t *TelegramClient) GetInviteLink(ctx context.Context, secret string) (stri
 	return fmt.Sprintf("https://telegram.me/%s?start=%s", me.UserName, secret), nil
 }
 
+func (t *TelegramClient) ProcessChatJoinRequest(ctx context.Context, chatID int64, userID int64, accept bool) error {
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return err
+	}
+
+	t.chatLimiter.Wait(ctx, chatID)
+
+	if accept {
+		_, err := t.api.Request(
+			tgbotapi.ApproveChatJoinRequestConfig{
+				ChatConfig: tgbotapi.ChatConfig{
+					ChatID: chatID,
+				},
+				UserID: userID,
+			})
+
+		return t.handleError(err)
+	}
+
+	_, err := t.api.Request(
+		tgbotapi.DeclineChatJoinRequest{
+			ChatConfig: tgbotapi.ChatConfig{
+				ChatID: chatID,
+			},
+			UserID: userID,
+		})
+
+	return t.handleError(err)
+}
+
 func (t *TelegramClient) GetBotCommands(ctx context.Context, fromChatID int64) ([]tgbotapi.BotCommand, error) {
 	if err := t.globalLimiter.Wait(ctx); err != nil {
 		return nil, err

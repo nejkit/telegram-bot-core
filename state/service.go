@@ -2,6 +2,9 @@ package state
 
 import (
 	"context"
+	"slices"
+	"time"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/nejkit/telegram-bot-core/client"
 	"github.com/nejkit/telegram-bot-core/config"
@@ -10,8 +13,6 @@ import (
 	"github.com/nejkit/telegram-bot-core/storage"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
-	"slices"
-	"time"
 )
 
 type BotCommand interface {
@@ -39,10 +40,11 @@ type TelegramStateService[Action storage.UserAction, Command BotCommand, Callbac
 	actionHandler   map[Action]HandlerInfo
 	callbackHandler map[Callback]HandlerInfo
 
-	chatMemberHandler     HandlerFunc
-	myChatMemberHandler   HandlerFunc
-	limiterMessageHandler HandlerFunc
-	chatMigrationHandler  HandlerFunc
+	chatMemberHandler      HandlerFunc
+	myChatMemberHandler    HandlerFunc
+	limiterMessageHandler  HandlerFunc
+	chatMigrationHandler   HandlerFunc
+	chatJoinRequestHandler HandlerFunc
 
 	actionStorage      storage.UserActionStorage
 	messageStorage     storage.UserMessageStorage
@@ -259,6 +261,12 @@ func (t *TelegramStateService[Action, Command, Callback]) RegisterMigrationHandl
 	return t
 }
 
+func (t *TelegramStateService[Action, Command, Callback]) RegisterChatJoinRequestHandler(handler HandlerFunc) *TelegramStateService[Action, Command, Callback] {
+	t.chatJoinRequestHandler = handler
+
+	return t
+}
+
 func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Context) {
 	updatesChan := t.telegramClient.GetUpdates()
 	logrus.Info("start telegram updates handler service")
@@ -298,6 +306,11 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 
 			if update.MyChatMember != nil {
 				chatID = update.MyChatMember.Chat.ID
+				withRateCheck = false
+			}
+
+			if update.ChatJoinRequest != nil {
+				chatID = update.ChatJoinRequest.Chat.ID
 				withRateCheck = false
 			}
 
@@ -361,10 +374,13 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 						if update.MyChatMember != nil {
 							chatInfo = &tgbotapi.Chat{ID: update.MyChatMember.Chat.ID}
 						}
+						if update.ChatJoinRequest != nil {
+							chatInfo = &update.ChatJoinRequest.Chat
+						}
 					}
 
 					if chatInfo == nil {
-						panic("")
+						continue
 					}
 
 					omitChatIdsChan <- chatInfo.ID
@@ -470,7 +486,10 @@ func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx conte
 		return
 	}
 
-	if update.MyChatMember != nil && t.myChatMemberHandler != nil {
+	if update.MyChatMember != nil {
+		if t.myChatMemberHandler == nil {
+			return
+		}
 		log.Debug("handle my chat member event")
 		if err := t.myChatMemberHandler(ctx, update); err != nil {
 			log.WithError(err).Error("failed handle my chat member event")
@@ -478,9 +497,23 @@ func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx conte
 		return
 	}
 
-	if update.ChatMember != nil && t.chatMemberHandler != nil {
+	if update.ChatMember != nil {
+		if t.chatMemberHandler == nil {
+			return
+		}
 		log.Debug("handle chat member event")
 		if err := t.chatMemberHandler(ctx, update); err != nil {
+			log.WithError(err).Error("failed handle chat member event")
+		}
+		return
+	}
+
+	if update.ChatJoinRequest != nil {
+		if t.chatJoinRequestHandler == nil {
+			return
+		}
+		log.Debug("handle chat member event")
+		if err := t.chatJoinRequestHandler(ctx, update); err != nil {
 			log.WithError(err).Error("failed handle chat member event")
 		}
 		return
