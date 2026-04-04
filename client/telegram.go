@@ -322,6 +322,16 @@ func (t *TelegramClient) GetInviteLink(ctx context.Context, secret string) (stri
 	return fmt.Sprintf("https://telegram.me/%s?start=%s", me.UserName, secret), nil
 }
 
+func (t *TelegramClient) AnswerCallbackQuery(ctx context.Context, callbackID string) error {
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return err
+	}
+
+	_, err := t.api.Request(tgbotapi.NewCallback(callbackID, ""))
+
+	return t.handleError(err)
+}
+
 func (t *TelegramClient) ProcessChatJoinRequest(ctx context.Context, chatID int64, userID int64, accept bool) error {
 	if err := t.globalLimiter.Wait(ctx); err != nil {
 		return err

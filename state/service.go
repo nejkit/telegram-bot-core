@@ -542,6 +542,10 @@ func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx conte
 	if update.CallbackQuery != nil {
 		log.Debug("handle callback event")
 		t.handleCallback(ctx, update)
+
+		if err := t.telegramClient.AnswerCallbackQuery(ctx, update.CallbackQuery.ID); err != nil {
+			log.WithError(err).Error("failed answer callback query")
+		}
 		return
 	}
 }
