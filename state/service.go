@@ -281,7 +281,9 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 
 		case update, ok := <-updatesChan:
 			if !ok {
-				return
+				logrus.Warning("chan was closed, try to recreate")
+				updatesChan = t.telegramClient.GetUpdates()
+				continue
 			}
 
 			fromChat := update.FromChat()
