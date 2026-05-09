@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -28,6 +29,7 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout || resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusInternalServerError {
+			resp.Body.Close()
 			time.Sleep(t.Wait)
 			continue
 		}
@@ -39,10 +41,12 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		var tgError tgbotapi.APIResponse
 
 		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 
 		_ = json.Unmarshal(body, &tgError)
 
 		if tgError.ErrorCode != 429 {
+			resp.Body = io.NopCloser(bytes.NewReader(body))
 			return resp, err
 		}
 

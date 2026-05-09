@@ -430,9 +430,9 @@ func (t *TelegramClient) GetContactInfo(ctx context.Context, userID int64) (*tgb
 	return &contact, nil
 }
 
-func (t *TelegramClient) GetUpdates() tgbotapi.UpdatesChannel {
+func (t *TelegramClient) GetUpdates(offset int) tgbotapi.UpdatesChannel {
 	return t.api.GetUpdatesChan(tgbotapi.UpdateConfig{
-		Offset:         0,
+		Offset:         offset,
 		Limit:          10,
 		Timeout:        30,
 		AllowedUpdates: t.allowedUpdates,

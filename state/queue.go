@@ -89,5 +89,7 @@ func (q *QueueManager) Omit(chatID int64) {
 		if q.lastMember == nil {
 			q.lastMember = queue
 		}
+
+		return
 	}
 }

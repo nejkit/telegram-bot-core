@@ -268,7 +268,8 @@ func (t *TelegramStateService[Action, Command, Callback]) RegisterChatJoinReques
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Context) {
-	updatesChan := t.telegramClient.GetUpdates()
+	var lastUpdateID int
+	updatesChan := t.telegramClient.GetUpdates(0)
 	logrus.Info("start telegram updates handler service")
 	go t.startConsumeQueueChan(ctx)
 	t.telegramClient.RunChatRatesCleanup(ctx)
@@ -282,8 +283,12 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 		case update, ok := <-updatesChan:
 			if !ok {
 				logrus.Warning("chan was closed, try to recreate")
-				updatesChan = t.telegramClient.GetUpdates()
+				updatesChan = t.telegramClient.GetUpdates(lastUpdateID + 1)
 				continue
+			}
+
+			if update.UpdateID > lastUpdateID {
+				lastUpdateID = update.UpdateID
 			}
 
 			fromChat := update.FromChat()
