@@ -430,6 +430,25 @@ func (t *TelegramClient) GetContactInfo(ctx context.Context, userID int64) (*tgb
 	return &contact, nil
 }
 
+func (t *TelegramClient) CheckUserExistenceInChat(ctx context.Context, chatID, userID int64) (bool, error) {
+	if err := t.globalLimiter.Wait(ctx); err != nil {
+		return false, err
+	}
+
+	user, err := t.api.GetChatMember(tgbotapi.GetChatMemberConfig{
+		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
+			ChatID: chatID,
+			UserID: userID,
+		},
+	})
+
+	if err != nil {
+		return false, t.handleError(err)
+	}
+
+	return !(user.HasLeft() || user.WasKicked()), nil
+}
+
 func (t *TelegramClient) GetUpdates(offset int) tgbotapi.UpdatesChannel {
 	return t.api.GetUpdatesChan(tgbotapi.UpdateConfig{
 		Offset:         offset,
