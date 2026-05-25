@@ -6,9 +6,15 @@ import (
 	"io"
 	"net/http"
 	"time"
-
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+type apiResponse struct {
+	OK         bool `json:"ok"`
+	ErrorCode  int  `json:"error_code,omitempty"`
+	Parameters struct {
+		RetryAfter int `json:"retry_after,omitempty"`
+	} `json:"parameters,omitempty"`
+}
 
 type RetryTransport struct {
 	Base    http.RoundTripper
@@ -38,7 +44,7 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return resp, nil
 		}
 
-		var tgError tgbotapi.APIResponse
+		var tgError apiResponse
 
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()

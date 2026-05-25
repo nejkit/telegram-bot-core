@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/dgraph-io/ristretto"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/go-telegram/bot/models"
 	"github.com/nejkit/telegram-bot-core/domain"
 	"github.com/redis/go-redis/v9"
 )
 
 type KeyboardInfo struct {
-	Keyboards       []tgbotapi.InlineKeyboardMarkup
+	Keyboards       []models.InlineKeyboardMarkup
 	CurrentPosition int
 }
 

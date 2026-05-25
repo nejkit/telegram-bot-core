@@ -1,13 +1,21 @@
 package utils
 
 import (
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/go-telegram/bot/models"
 	"github.com/nejkit/telegram-bot-core/state"
 	"github.com/nejkit/telegram-bot-core/storage"
 	"github.com/sirupsen/logrus"
 )
 
-type buttonFactoryFunc func(key, value string) tgbotapi.InlineKeyboardButton
+type buttonFactoryFunc func(key, value string) models.InlineKeyboardButton
+
+func newInlineKeyboardButtonData(text, data string) models.InlineKeyboardButton {
+	return models.InlineKeyboardButton{Text: text, CallbackData: data}
+}
+
+func newInlineKeyboardButtonURL(text, url string) models.InlineKeyboardButton {
+	return models.InlineKeyboardButton{Text: text, URL: url}
+}
 
 func BuildInlineDataKeyboard(
 	sortedKeys []string,
@@ -18,7 +26,7 @@ func BuildInlineDataKeyboard(
 		sortedKeys,
 		data,
 		pageSize,
-		tgbotapi.NewInlineKeyboardButtonData,
+		newInlineKeyboardButtonData,
 	)
 }
 
@@ -31,7 +39,7 @@ func BuildInlineURLKeyboard(
 		sortedKeys,
 		data,
 		pageSize,
-		tgbotapi.NewInlineKeyboardButtonURL,
+		newInlineKeyboardButtonURL,
 	)
 }
 
@@ -48,45 +56,37 @@ func buildInlineKeyboard(
 
 	pagesAmount := (len(sortedKeys) + pageSize - 1) / pageSize
 
-	keyboards := make([]tgbotapi.InlineKeyboardMarkup, pagesAmount)
+	keyboards := make([]models.InlineKeyboardMarkup, pagesAmount)
 
 	for keyIdx := range sortedKeys {
 		pageNumber := keyIdx / pageSize
 
 		if keyboards[pageNumber].InlineKeyboard == nil {
-			keyboards[pageNumber].InlineKeyboard = make([][]tgbotapi.InlineKeyboardButton, 0)
+			keyboards[pageNumber].InlineKeyboard = make([][]models.InlineKeyboardButton, 0)
 		}
 
 		buttonTitle := sortedKeys[keyIdx]
 
 		keyboards[pageNumber].InlineKeyboard = append(
 			keyboards[pageNumber].InlineKeyboard,
-			tgbotapi.NewInlineKeyboardRow(factoryFunc(
-				buttonTitle,
-				data[buttonTitle],
-			),
-			),
+			[]models.InlineKeyboardButton{factoryFunc(buttonTitle, data[buttonTitle])},
 		)
 
 		if len(keyboards[pageNumber].InlineKeyboard) == pageSize {
-			row := tgbotapi.NewInlineKeyboardRow()
+			row := make([]models.InlineKeyboardButton, 0, 2)
 
 			if pageNumber != 0 {
-				row = append(row, tgbotapi.NewInlineKeyboardButtonData("Назад", state.WrapCallbackData(
+				row = append(row, newInlineKeyboardButtonData("Назад", state.WrapCallbackData(
 					"set-previous-keyboard",
 					"1",
-				),
-				),
-				)
+				)))
 			}
 
 			if pageNumber+1 != pagesAmount {
-				row = append(row, tgbotapi.NewInlineKeyboardButtonData("Вперед", state.WrapCallbackData(
+				row = append(row, newInlineKeyboardButtonData("Вперед", state.WrapCallbackData(
 					"set-next-keyboard",
 					"1",
-				),
-				),
-				)
+				)))
 			}
 
 			if len(row) > 0 {

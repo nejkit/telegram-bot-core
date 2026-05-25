@@ -3,9 +3,10 @@ package state
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/go-telegram/bot/models"
 	"github.com/nejkit/telegram-bot-core/client"
 	"github.com/nejkit/telegram-bot-core/config"
 	"github.com/nejkit/telegram-bot-core/limiter"
@@ -19,11 +20,11 @@ type BotCommand interface {
 	~string
 }
 
-type HandlerFunc func(ctx context.Context, update *tgbotapi.Update) error
+type HandlerFunc func(ctx context.Context, update *models.Update) error
 
-type MiddlewareFunc func(ctx context.Context, update *tgbotapi.Update) (context.Context, bool)
+type MiddlewareFunc func(ctx context.Context, update *models.Update) (context.Context, bool)
 
-type ValidatorFunc func(update *tgbotapi.Update) error
+type ValidatorFunc func(update *models.Update) error
 
 type HandlerInfo struct {
 	Handler           HandlerFunc
@@ -31,7 +32,7 @@ type HandlerInfo struct {
 }
 
 type TelegramStateService[Action storage.UserAction, Command BotCommand, Callback CallbackPrefix] struct {
-	chatRequestChannels map[int64]chan tgbotapi.Update
+	chatRequestChannels map[int64]chan *models.Update
 	processingQueueChan chan struct{}
 
 	telegramClient *client.TelegramClient
@@ -64,7 +65,7 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 	locales *locale.LocalizationProvider,
 ) *TelegramStateService[Action, Command, Callback] {
 	handler := &TelegramStateService[Action, Command, Callback]{
-		chatRequestChannels: make(map[int64]chan tgbotapi.Update),
+		chatRequestChannels: make(map[int64]chan *models.Update),
 		processingQueueChan: make(chan struct{}, cfg.WorkersCount),
 		commandHandler:      make(map[Command]HandlerInfo),
 		actionHandler:       make(map[Action]HandlerInfo),
@@ -90,9 +91,19 @@ func NewTelegramStateService[Action storage.UserAction, Command BotCommand, Call
 	return handler
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result error) {
+func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeyboardPage(ctx context.Context, update *models.Update) (result error) {
 	result = nil
-	userID := update.FromChat().ID
+	chat := UpdateChat(update)
+	if chat == nil {
+		return
+	}
+	userID := chat.ID
+	cbMessageID := callbackMessageID(update)
+
+	if cbMessageID == 0 {
+		return nil
+	}
+
 	messageInfos, err := t.messageStorage.GetUserMessages(ctx, userID)
 
 	if err != nil {
@@ -101,7 +112,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeybo
 	}
 
 	for _, messageInfo := range messageInfos {
-		if messageInfo.MessageID == update.CallbackQuery.Message.MessageID {
+		if messageInfo.MessageID == cbMessageID {
 			if !messageInfo.InlineKeyboard {
 				logrus.Error("message not contains inline keyboard")
 				return
@@ -144,9 +155,19 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetPreviousKeybo
 	return
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardPage(ctx context.Context, update *tgbotapi.Update) (result error) {
+func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardPage(ctx context.Context, update *models.Update) (result error) {
 	result = nil
-	userID := update.FromChat().ID
+	chat := UpdateChat(update)
+	if chat == nil {
+		return
+	}
+	userID := chat.ID
+	cbMessageID := callbackMessageID(update)
+
+	if cbMessageID == 0 {
+		return nil
+	}
+
 	messageInfos, err := t.messageStorage.GetUserMessages(ctx, userID)
 
 	if err != nil {
@@ -155,7 +176,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleSetNextKeyboardP
 	}
 
 	for _, messageInfo := range messageInfos {
-		if messageInfo.MessageID == update.CallbackQuery.Message.MessageID {
+		if messageInfo.MessageID == cbMessageID {
 			if !messageInfo.InlineKeyboard {
 				logrus.Error("message not contains inline keyboard")
 				return
@@ -268,8 +289,7 @@ func (t *TelegramStateService[Action, Command, Callback]) RegisterChatJoinReques
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Context) {
-	var lastUpdateID int
-	updatesChan := t.telegramClient.GetUpdates(0)
+	updatesChan := t.telegramClient.GetUpdates(ctx)
 	logrus.Info("start telegram updates handler service")
 	go t.startConsumeQueueChan(ctx)
 	t.telegramClient.RunChatRatesCleanup(ctx)
@@ -282,47 +302,29 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 
 		case update, ok := <-updatesChan:
 			if !ok {
-				logrus.Warning("chan was closed, try to recreate")
-				updatesChan = t.telegramClient.GetUpdates(lastUpdateID + 1)
-				continue
+				logrus.Warning("updates chan was closed, polling stopped")
+				return
 			}
 
-			if update.UpdateID > lastUpdateID {
-				lastUpdateID = update.UpdateID
+			chat := UpdateChat(update)
+			user := UpdateUser(update)
+
+			var chatID, userID int64
+			if chat != nil {
+				chatID = chat.ID
+			}
+			if user != nil {
+				userID = user.ID
 			}
 
-			fromChat := update.FromChat()
-			fromUser := update.SentFrom()
-
-			if fromChat == nil {
-				fromChat = &tgbotapi.Chat{}
-			}
-
-			if fromUser == nil {
-				fromUser = &tgbotapi.User{}
-			}
-
-			chatID := fromChat.ID
-			userID := fromUser.ID
 			withRateCheck := true
 
-			if update.ChatMember != nil {
-				chatID = update.ChatMember.Chat.ID
-				withRateCheck = false
-			}
-
-			if update.MyChatMember != nil {
-				chatID = update.MyChatMember.Chat.ID
-				withRateCheck = false
-			}
-
-			if update.ChatJoinRequest != nil {
-				chatID = update.ChatJoinRequest.Chat.ID
+			if update.ChatMember != nil || update.MyChatMember != nil || update.ChatJoinRequest != nil {
 				withRateCheck = false
 			}
 
 			log := logrus.WithFields(logrus.Fields{
-				"updateID": update.UpdateID,
+				"updateID": update.ID,
 				"userID":   userID,
 				"chatID":   chatID,
 			})
@@ -332,7 +334,7 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 			if withRateCheck && !t.limiter.Check(userID) {
 				log.Debug("rate limit exceeded, skip update")
 				if t.limiterMessageHandler != nil {
-					if err := t.limiterMessageHandler(ctx, &update); err != nil {
+					if err := t.limiterMessageHandler(ctx, update); err != nil {
 						log.WithError(err).Error("failed execute limiter message handler")
 					}
 				}
@@ -343,7 +345,7 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 			log.Debug("success check rates by this user")
 
 			if _, ok = t.chatRequestChannels[chatID]; !ok {
-				t.chatRequestChannels[chatID] = make(chan tgbotapi.Update, 10)
+				t.chatRequestChannels[chatID] = make(chan *models.Update, 10)
 			}
 
 			t.chatRequestChannels[chatID] <- update
@@ -356,7 +358,7 @@ func (t *TelegramStateService[Action, Command, Callback]) Run(ctx context.Contex
 }
 
 func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(ctx context.Context) {
-	processingChan := make(chan tgbotapi.Update, t.workersCount)
+	processingChan := make(chan *models.Update, t.workersCount)
 	omitChatIdsChan := make(chan int64, t.workersCount)
 
 	go t.processor.Run(ctx, omitChatIdsChan)
@@ -370,27 +372,15 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 
 				case update := <-processingChan:
 					logrus.WithField("workerID", workerId).Debug("start processing update")
-					t.handleUpdate(ctx, &update)
+					t.handleUpdate(ctx, update)
 					logrus.WithField("workerID", workerId).Debug("finished processing update")
-					chatInfo := update.FromChat()
 
-					if chatInfo == nil {
-						if update.ChatMember != nil {
-							chatInfo = &tgbotapi.Chat{ID: update.ChatMember.Chat.ID}
-						}
-						if update.MyChatMember != nil {
-							chatInfo = &tgbotapi.Chat{ID: update.MyChatMember.Chat.ID}
-						}
-						if update.ChatJoinRequest != nil {
-							chatInfo = &update.ChatJoinRequest.Chat
-						}
-					}
-
-					if chatInfo == nil {
+					chat := UpdateChat(update)
+					if chat == nil {
 						continue
 					}
 
-					omitChatIdsChan <- chatInfo.ID
+					omitChatIdsChan <- chat.ID
 				}
 			}
 		}(i)
@@ -433,7 +423,7 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 				continue
 			}
 
-			log.WithField("updateID", update.UpdateID).Debug("add update to worker processing queue")
+			log.WithField("updateID", update.ID).Debug("add update to worker processing queue")
 
 			processingChan <- update
 			ticker.Reset(time.Millisecond * 100)
@@ -468,7 +458,7 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 				continue
 			}
 
-			log.WithField("updateID", update.UpdateID).Debug("add update to worker processing queue")
+			log.WithField("updateID", update.ID).Debug("add update to worker processing queue")
 
 			processingChan <- update
 			ticker.Reset(time.Millisecond * 100)
@@ -476,9 +466,9 @@ func (t *TelegramStateService[Action, Command, Callback]) startConsumeQueueChan(
 	}
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx context.Context, update *tgbotapi.Update) {
+func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx context.Context, update *models.Update) {
 	log := logrus.WithFields(logrus.Fields{
-		"updateID": update.UpdateID,
+		"updateID": update.ID,
 	})
 
 	if update.Message != nil && update.Message.MigrateToChatID != 0 {
@@ -557,20 +547,29 @@ func (t *TelegramStateService[Action, Command, Callback]) handleUpdate(ctx conte
 	}
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx context.Context, update *tgbotapi.Update) {
-	userID := update.SentFrom().ID
+func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx context.Context, update *models.Update) {
+	user := UpdateUser(update)
+	chat := UpdateChat(update)
+	var userID, chatID int64
+	if user != nil {
+		userID = user.ID
+	}
+	if chat != nil {
+		chatID = chat.ID
+	}
 	log := logrus.WithFields(logrus.Fields{
-		"updateID": update.UpdateID,
+		"updateID": update.ID,
 		"userID":   userID,
-		"chatID":   update.FromChat().ID,
+		"chatID":   chatID,
 	})
 
 	log.Debug("check is event contains callback data")
-	log.Debug("callback entry: " + update.CallbackData())
+	cbData := callbackData(update)
+	log.Debug("callback entry: " + cbData)
 
-	callback, _ := UnwrapCallbackData[Callback](update.CallbackData())
+	callback, _ := UnwrapCallbackData[Callback](cbData)
 
-	log.Debug("parsed callback: " + callback)
+	log.Debug("parsed callback: " + string(callback))
 
 	callbackHandler, ok := t.callbackHandler[callback]
 
@@ -609,27 +608,36 @@ func (t *TelegramStateService[Action, Command, Callback]) handleCallback(ctx con
 	}
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx context.Context, update *tgbotapi.Update) {
-	userID := update.SentFrom().ID
-	chatID := update.FromChat().ID
+func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx context.Context, update *models.Update) {
+	user := UpdateUser(update)
+	chat := UpdateChat(update)
+	var userID, chatID int64
+	if user != nil {
+		userID = user.ID
+	}
+	if chat != nil {
+		chatID = chat.ID
+	}
 	log := logrus.WithFields(logrus.Fields{
-		"updateID": update.UpdateID,
+		"updateID": update.ID,
 		"userID":   userID,
-		"chatID":   update.FromChat().ID,
+		"chatID":   chatID,
 	})
 
 	log.Debug("check is event is bot command")
 
-	cmdHandler, ok := t.commandHandler[Command(update.Message.Command())]
+	cmd := MessageCommand(update.Message)
+
+	cmdHandler, ok := t.commandHandler[Command(cmd)]
 
 	if ok {
-		log.WithField("command", update.Message.Command()).Debug("try process validations before call handler")
+		log.WithField("command", cmd).Debug("try process validations before call handler")
 
 		if err := t.processValidation(ctx, chatID, update, cmdHandler.MessageValidators, log, 0); err != nil {
 			return
 		}
 
-		log.WithField("command", update.Message.Command()).Debug("validations processed, call handler")
+		log.WithField("command", cmd).Debug("validations processed, call handler")
 
 		err := cmdHandler.Handler(ctx, update)
 
@@ -652,7 +660,7 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 		return
 	}
 
-	isCancel := update.Message.IsCommand() && update.Message.Command() == "cancel"
+	isCancel := MessageIsCommand(update.Message) && MessageCommand(update.Message) == "cancel"
 
 	if isCancel {
 		log.WithField("action", action).
@@ -682,15 +690,15 @@ func (t *TelegramStateService[Action, Command, Callback]) handleMessage(ctx cont
 	}
 }
 
-func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx context.Context, chatID int64, update *tgbotapi.Update, validators []ValidatorFunc, log *logrus.Entry, action Action) error {
+func (t *TelegramStateService[Action, Command, Callback]) processValidation(ctx context.Context, chatID int64, update *models.Update, validators []ValidatorFunc, log *logrus.Entry, action Action) error {
 	updateMessageID := 0
 
 	if update.Message != nil {
-		updateMessageID = update.Message.MessageID
+		updateMessageID = update.Message.ID
 	}
 
 	if update.CallbackQuery != nil {
-		updateMessageID = update.CallbackQuery.Message.MessageID
+		updateMessageID = callbackMessageID(update)
 	}
 
 	for _, validator := range validators {
@@ -733,4 +741,108 @@ func getLangFromContext(ctx context.Context) string {
 	}
 
 	return lang.(string)
+}
+
+// UpdateChat extracts the chat associated with the update across all known carriers
+// (message, callback query, chat member events, join requests, etc.).
+func UpdateChat(u *models.Update) *models.Chat {
+	switch {
+	case u.Message != nil:
+		return &u.Message.Chat
+	case u.EditedMessage != nil:
+		return &u.EditedMessage.Chat
+	case u.ChannelPost != nil:
+		return &u.ChannelPost.Chat
+	case u.EditedChannelPost != nil:
+		return &u.EditedChannelPost.Chat
+	case u.CallbackQuery != nil:
+		if u.CallbackQuery.Message.Type == models.MaybeInaccessibleMessageTypeMessage && u.CallbackQuery.Message.Message != nil {
+			return &u.CallbackQuery.Message.Message.Chat
+		}
+		if u.CallbackQuery.Message.InaccessibleMessage != nil {
+			return &u.CallbackQuery.Message.InaccessibleMessage.Chat
+		}
+	case u.MyChatMember != nil:
+		return &u.MyChatMember.Chat
+	case u.ChatMember != nil:
+		return &u.ChatMember.Chat
+	case u.ChatJoinRequest != nil:
+		return &u.ChatJoinRequest.Chat
+	}
+	return nil
+}
+
+// UpdateUser extracts the user associated with the update.
+func UpdateUser(u *models.Update) *models.User {
+	switch {
+	case u.Message != nil:
+		return u.Message.From
+	case u.EditedMessage != nil:
+		return u.EditedMessage.From
+	case u.InlineQuery != nil:
+		return u.InlineQuery.From
+	case u.ChosenInlineResult != nil:
+		return &u.ChosenInlineResult.From
+	case u.CallbackQuery != nil:
+		return &u.CallbackQuery.From
+	case u.ShippingQuery != nil:
+		return u.ShippingQuery.From
+	case u.PreCheckoutQuery != nil:
+		return u.PreCheckoutQuery.From
+	case u.MyChatMember != nil:
+		return &u.MyChatMember.From
+	case u.ChatMember != nil:
+		return &u.ChatMember.From
+	case u.ChatJoinRequest != nil:
+		return &u.ChatJoinRequest.From
+	}
+	return nil
+}
+
+// MessageIsCommand reports whether the first entity of the message is a bot command at offset 0.
+func MessageIsCommand(m *models.Message) bool {
+	if m == nil || len(m.Entities) == 0 {
+		return false
+	}
+	e := m.Entities[0]
+	return e.Type == models.MessageEntityTypeBotCommand && e.Offset == 0
+}
+
+// MessageCommand returns the command name (without the leading slash or "@botname" suffix)
+// for messages whose first entity is a bot command.
+func MessageCommand(m *models.Message) string {
+	if !MessageIsCommand(m) {
+		return ""
+	}
+	length := m.Entities[0].Length
+	if length <= 1 || length > len(m.Text) {
+		return ""
+	}
+	cmd := m.Text[1:length]
+	if idx := strings.Index(cmd, "@"); idx >= 0 {
+		cmd = cmd[:idx]
+	}
+	return cmd
+}
+
+func callbackData(u *models.Update) string {
+	if u.CallbackQuery == nil {
+		return ""
+	}
+	return u.CallbackQuery.Data
+}
+
+func callbackMessageID(u *models.Update) int {
+	if u.CallbackQuery == nil {
+		return 0
+	}
+	switch u.CallbackQuery.Message.Type {
+	case models.MaybeInaccessibleMessageTypeMessage:
+		if u.CallbackQuery.Message.Message != nil {
+			return u.CallbackQuery.Message.Message.ID
+		}
+	case models.MaybeInaccessibleMessageTypeInaccessibleMessage:
+		return 0
+	}
+	return 0
 }
