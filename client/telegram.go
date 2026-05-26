@@ -14,8 +14,8 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/nejkit/telegram-bot-core/config"
-	"github.com/nejkit/telegram-bot-core/limiter"
+	"github.com/nejkit/telegram-bot-core/v2/config"
+	"github.com/nejkit/telegram-bot-core/v2/limiter"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )

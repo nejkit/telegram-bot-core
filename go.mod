@@ -1,4 +1,4 @@
-module github.com/nejkit/telegram-bot-core
+module github.com/nejkit/telegram-bot-core/v2
 
 go 1.25
 

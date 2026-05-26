@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/go-telegram/bot/models"
-	"github.com/nejkit/telegram-bot-core/client"
-	"github.com/nejkit/telegram-bot-core/config"
-	"github.com/nejkit/telegram-bot-core/limiter"
-	"github.com/nejkit/telegram-bot-core/locale"
-	"github.com/nejkit/telegram-bot-core/storage"
+	"github.com/nejkit/telegram-bot-core/v2/client"
+	"github.com/nejkit/telegram-bot-core/v2/config"
+	"github.com/nejkit/telegram-bot-core/v2/limiter"
+	"github.com/nejkit/telegram-bot-core/v2/locale"
+	"github.com/nejkit/telegram-bot-core/v2/storage"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )

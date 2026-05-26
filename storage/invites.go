@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/dgraph-io/ristretto"
-	"github.com/nejkit/telegram-bot-core/domain"
+	"github.com/nejkit/telegram-bot-core/v2/domain"
 	"github.com/redis/go-redis/v9"
 	"time"
 )

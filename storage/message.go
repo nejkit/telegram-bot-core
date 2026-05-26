@@ -8,7 +8,7 @@ import (
 
 	"github.com/dgraph-io/ristretto"
 	"github.com/go-telegram/bot/models"
-	"github.com/nejkit/telegram-bot-core/domain"
+	"github.com/nejkit/telegram-bot-core/v2/domain"
 	"github.com/redis/go-redis/v9"
 )
 

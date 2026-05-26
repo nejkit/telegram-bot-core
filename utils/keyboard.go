@@ -2,8 +2,8 @@ package utils
 
 import (
 	"github.com/go-telegram/bot/models"
-	"github.com/nejkit/telegram-bot-core/state"
-	"github.com/nejkit/telegram-bot-core/storage"
+	"github.com/nejkit/telegram-bot-core/v2/state"
+	"github.com/nejkit/telegram-bot-core/v2/storage"
 	"github.com/sirupsen/logrus"
 )
 
