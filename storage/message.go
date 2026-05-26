@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// pupupu
 type KeyboardInfo struct {
 	Keyboards       []models.InlineKeyboardMarkup
 	CurrentPosition int
